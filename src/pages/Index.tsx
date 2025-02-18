@@ -2,7 +2,7 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Upload, Check, X, Search, Loader2 } from 'lucide-react';
+import { FileText, Upload, Check, X, Search, Loader2, FileSearch } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import UploadZone from '@/components/UploadZone';
@@ -20,9 +20,65 @@ const Index = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState<any>(null);
   const { toast } = useToast();
+  const [processedTexts, setProcessedTexts] = useState<{[key: string]: string}>({});
+  const [loadingTexts, setLoadingTexts] = useState<{[key: string]: boolean}>({});
 
-  const handleFilesAccepted = useCallback((acceptedFiles: File[]) => {
+  const handleFilesAccepted = useCallback((acceptedFiles: File[], processedData?: any) => {
     setFiles(prev => [...prev, ...acceptedFiles]);
+    
+    if (processedData) {
+      const documentId = processedData.document.id;
+      setLoadingTexts(prev => ({...prev, [documentId]: true}));
+      
+      // Poll for processed text
+      const checkProcessing = async () => {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/documents?id=eq.${documentId}&select=processed_text,status`, {
+            headers: {
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+            }
+          });
+          
+          const [data] = await response.json();
+          
+          if (data?.status === 'processed' && data?.processed_text) {
+            setProcessedTexts(prev => ({...prev, [documentId]: data.processed_text}));
+            setLoadingTexts(prev => ({...prev, [documentId]: false}));
+            return true;
+          }
+          
+          return false;
+        } catch (error) {
+          console.error('Error checking processing status:', error);
+          return false;
+        }
+      };
+
+      const poll = async () => {
+        let attempts = 0;
+        const maxAttempts = 30; // 30 segundos máximo
+        
+        while (attempts < maxAttempts) {
+          const isProcessed = await checkProcessing();
+          if (isProcessed) break;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          attempts++;
+        }
+        
+        if (attempts >= maxAttempts) {
+          setLoadingTexts(prev => ({...prev, [documentId]: false}));
+          toast({
+            title: "Tiempo de procesamiento excedido",
+            description: "No se pudo obtener el texto procesado. Por favor, intente nuevamente.",
+            variant: "destructive"
+          });
+        }
+      };
+
+      poll();
+    }
+
     toast({
       title: "Archivos subidos exitosamente",
       description: `Se han agregado ${acceptedFiles.length} archivo(s).`
@@ -81,27 +137,53 @@ const Index = () => {
             <UploadZone onFilesAccepted={handleFilesAccepted} />
             
             <AnimatePresence>
-              {files.length > 0 && <motion.div initial={{
-              opacity: 0,
-              y: 20
-            }} animate={{
-              opacity: 1,
-              y: 0
-            }} exit={{
-              opacity: 0,
-              y: -20
-            }} className="bg-white rounded-lg shadow-sm border p-4">
+              {files.length > 0 && <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="bg-white rounded-lg shadow-sm border p-4"
+              >
                   <h3 className="text-lg font-medium mb-4">Archivos Subidos</h3>
-                  <div className="space-y-2">
-                    {files.map((file, index) => <div key={`${file.name}-${index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
-                        <div className="flex items-center space-x-3">
-                          <FileText className="h-5 w-5 text-blue-500" />
-                          <span className="text-sm text-gray-700">{file.name}</span>
+                  <div className="space-y-4">
+                    {files.map((file, index) => (
+                      <div key={`${file.name}-${index}`}>
+                        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                          <div className="flex items-center space-x-3">
+                            <FileText className="h-5 w-5 text-blue-500" />
+                            <span className="text-sm text-gray-700">{file.name}</span>
+                          </div>
+                          <button onClick={() => removeFile(index)} className="text-gray-400 hover:text-red-500 transition-colors">
+                            <X className="h-5 w-5" />
+                          </button>
                         </div>
-                        <button onClick={() => removeFile(index)} className="text-gray-400 hover:text-red-500 transition-colors">
-                          <X className="h-5 w-5" />
-                        </button>
-                      </div>)}
+                        
+                        {loadingTexts[index] && (
+                          <div className="mt-2 p-3 bg-gray-50 rounded-md flex items-center space-x-2 text-sm text-gray-500">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Procesando texto...</span>
+                          </div>
+                        )}
+                        
+                        {processedTexts[index] && (
+                          <motion.div 
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="mt-2"
+                          >
+                            <div className="p-3 bg-gray-50 rounded-md">
+                              <div className="flex items-center space-x-2 mb-2 text-sm text-gray-700">
+                                <FileSearch className="h-4 w-4" />
+                                <span className="font-medium">Texto Extraído:</span>
+                              </div>
+                              <div className="text-sm text-gray-600 whitespace-pre-wrap max-h-40 overflow-y-auto">
+                                {processedTexts[index]}
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </motion.div>}
             </AnimatePresence>
