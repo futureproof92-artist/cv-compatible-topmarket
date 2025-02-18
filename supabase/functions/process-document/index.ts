@@ -1,105 +1,102 @@
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+};
 
 serve(async (req) => {
+  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders })
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const formData = await req.formData()
-    const file = formData.get('file')
-
+    console.log('Iniciando procesamiento de documento');
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    
     if (!file) {
-      throw new Error('No file uploaded')
+      throw new Error('No file provided');
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    console.log('Archivo recibido:', file.name);
 
-    const fileName = file.name
-    const contentType = file.type
-    const fileExtension = fileName.split('.').pop()?.toLowerCase()
-    const filePath = `${crypto.randomUUID()}.${fileExtension}`
+    // Crear el registro del documento en la base de datos
+    const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
+    
+    const supabaseAdmin = createClient(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY,
+    );
 
-    // Upload file to Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('documents')
-      .upload(filePath, file, {
-        contentType: contentType,
-        upsert: false
-      })
-
-    if (uploadError) {
-      throw new Error(`Failed to upload file: ${uploadError.message}`)
-    }
-
-    // Insert document record
-    const { data: documentData, error: insertError } = await supabase
+    const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
-        filename: fileName,
-        file_path: filePath,
-        content_type: contentType,
-        status: 'uploaded'
+        filename: file.name,
+        content_type: file.type,
+        status: 'processing',
       })
       .select()
-      .single()
+      .single();
 
     if (insertError) {
-      throw new Error(`Failed to create document record: ${insertError.message}`)
+      console.error('Error insertando documento:', insertError);
+      throw insertError;
     }
 
-    // If the file is an image, trigger image processing
-    if (contentType.startsWith('image/')) {
-      console.log('Processing image document:', documentData.id)
-      const { error: processError } = await supabase.functions.invoke('process-image', {
-        body: {
-          documentId: documentData.id,
-          imageUrl: filePath
-        }
+    console.log('Documento creado:', document);
+
+    // Procesar el contenido del archivo (ejemplo simplificado)
+    const text = await file.text();
+    console.log('Texto extraído, longitud:', text.length);
+
+    // Actualizar el documento con el texto procesado
+    const { error: updateError } = await supabaseAdmin
+      .from('documents')
+      .update({
+        processed_text: text,
+        status: 'processed',
+        processed_at: new Date().toISOString(),
       })
+      .eq('id', document.id);
 
-      if (processError) {
-        console.error('Error triggering image processing:', processError)
-      }
+    if (updateError) {
+      console.error('Error actualizando documento:', updateError);
+      throw updateError;
     }
+
+    console.log('Documento procesado exitosamente');
 
     return new Response(
-      JSON.stringify({
-        message: 'File uploaded successfully',
-        document: documentData
+      JSON.stringify({ 
+        success: true, 
+        document: { 
+          id: document.id,
+          filename: document.filename,
+          status: 'processed'
+        } 
       }),
       { 
         headers: { 
-          ...corsHeaders, 
+          ...corsHeaders,
           'Content-Type': 'application/json' 
         } 
       }
-    )
-
+    );
   } catch (error) {
-    console.error('Error processing document:', error)
+    console.error('Error en process-document:', error);
     return new Response(
-      JSON.stringify({ 
-        error: 'Failed to process document', 
-        details: error.message 
-      }),
+      JSON.stringify({ error: error.message }), 
       { 
+        status: 500,
         headers: { 
-          ...corsHeaders, 
-          'Content-Type': 'application/json' 
-        },
-        status: 500 
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
       }
-    )
+    );
   }
-})
+});

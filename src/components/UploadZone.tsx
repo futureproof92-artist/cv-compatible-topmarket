@@ -7,22 +7,34 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 
 interface UploadZoneProps {
-  onFilesAccepted: (files: File[]) => void;
+  onFilesAccepted: (files: File[], processedData?: any) => void;
 }
 
 const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
   const { toast } = useToast();
 
   const processFile = async (file: File) => {
+    console.log('Iniciando procesamiento del archivo:', file.name);
     const formData = new FormData();
     formData.append('file', file);
 
     try {
+      console.log('Invocando función process-document...');
       const { data, error } = await supabase.functions.invoke('process-document', {
         body: formData,
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error en process-document:', error);
+        throw error;
+      }
+
+      console.log('Respuesta de process-document:', data);
+
+      if (!data?.document?.id) {
+        console.error('No se recibió document.id en la respuesta');
+        throw new Error('No se recibió ID del documento');
+      }
 
       toast({
         title: "Archivo procesado exitosamente",
@@ -31,7 +43,7 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
 
       return data;
     } catch (error) {
-      console.error('Error processing file:', error);
+      console.error('Error procesando archivo:', error);
       toast({
         title: "Error al procesar el archivo",
         description: "Hubo un problema al procesar el archivo. Por favor, intenta nuevamente.",
@@ -42,18 +54,17 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const processedFiles = [];
+    console.log('Archivos recibidos en onDrop:', acceptedFiles.map(f => f.name));
+    
     for (const file of acceptedFiles) {
       try {
-        await processFile(file);
-        processedFiles.push(file);
+        console.log('Procesando archivo:', file.name);
+        const processedData = await processFile(file);
+        console.log('Datos procesados para', file.name, ':', processedData);
+        onFilesAccepted([file], processedData);
       } catch (error) {
-        console.error(`Error processing file ${file.name}:`, error);
+        console.error(`Error procesando archivo ${file.name}:`, error);
       }
-    }
-    
-    if (processedFiles.length > 0) {
-      onFilesAccepted(processedFiles);
     }
   }, [onFilesAccepted]);
 
