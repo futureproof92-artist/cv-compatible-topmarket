@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -5,6 +6,7 @@ import { FileText, Upload, Check, X, Search, Loader2, FileSearch } from 'lucide-
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { Progress } from "@/components/ui/progress";
 import UploadZone from '@/components/UploadZone';
 import RequirementsForm from '@/components/RequirementsForm';
 
@@ -22,9 +24,14 @@ const Index = () => {
   const { toast } = useToast();
   const [processedTexts, setProcessedTexts] = useState<{[key: string]: string}>({});
   const [loadingTexts, setLoadingTexts] = useState<{[key: string]: boolean}>({});
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const handleFilesAccepted = useCallback((acceptedFiles: File[], processedData?: any) => {
     setFiles(prev => [...prev, ...acceptedFiles]);
+    setUploadProgress(0);
+    
+    const totalFiles = acceptedFiles.length;
+    let processedCount = 0;
     
     if (processedData) {
       const documentId = processedData.document.id;
@@ -44,6 +51,8 @@ const Index = () => {
           if (data?.status === 'processed' && data?.processed_text) {
             setProcessedTexts(prev => ({...prev, [documentId]: data.processed_text}));
             setLoadingTexts(prev => ({...prev, [documentId]: false}));
+            processedCount++;
+            setUploadProgress((processedCount / totalFiles) * 100);
             return true;
           }
           
@@ -56,7 +65,7 @@ const Index = () => {
 
       const poll = async () => {
         let attempts = 0;
-        const maxAttempts = 30; // 30 segundos máximo
+        const maxAttempts = 30;
         
         while (attempts < maxAttempts) {
           const isProcessed = await checkProcessing();
@@ -72,6 +81,11 @@ const Index = () => {
             description: "No se pudo obtener el texto procesado. Por favor, intente nuevamente.",
             variant: "destructive"
           });
+        }
+
+        // Si todos los archivos están procesados, establecer progreso al 100%
+        if (processedCount === totalFiles) {
+          setUploadProgress(100);
         }
       };
 
@@ -159,13 +173,25 @@ const Index = () => {
             <UploadZone onFilesAccepted={handleFilesAccepted} />
             
             <AnimatePresence>
-              {files.length > 0 && <motion.div 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="bg-white rounded-lg shadow-sm border p-4"
-              >
+              {files.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="bg-white rounded-lg shadow-sm border p-4"
+                >
                   <h3 className="text-lg font-medium mb-4">Archivos Subidos</h3>
+                  
+                  {uploadProgress < 100 && uploadProgress > 0 && (
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-gray-600 mb-2">
+                        <span>Progreso de carga</span>
+                        <span>{Math.round(uploadProgress)}%</span>
+                      </div>
+                      <Progress value={uploadProgress} className="h-2" />
+                    </div>
+                  )}
+                  
                   <div className="space-y-4">
                     {files.map((file, index) => (
                       <div key={`${file.name}-${index}`}>
@@ -207,7 +233,8 @@ const Index = () => {
                       </div>
                     ))}
                   </div>
-                </motion.div>}
+                </motion.div>
+              )}
             </AnimatePresence>
           </div>
 
