@@ -25,9 +25,10 @@ serve(async (req) => {
 
     console.log('Archivo recibido:', file.name);
 
-    // Generar un file_path único
-    const fileExt = file.name.split('.').pop() || '';
-    const filePath = `${crypto.randomUUID()}.${fileExt}`;
+    // Generar un file_path único y sanitizado
+    const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
+    const filePath = `${sanitizedName}_${crypto.randomUUID()}.${fileExt}`;
     console.log('File path generado:', filePath);
 
     // Crear el registro del documento en la base de datos
@@ -38,11 +39,22 @@ serve(async (req) => {
       SUPABASE_SERVICE_ROLE_KEY ?? '',
     );
 
+    // Convertir el archivo a texto de manera segura
+    let text;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const decoder = new TextDecoder('utf-8');
+      text = decoder.decode(arrayBuffer);
+    } catch (error) {
+      console.error('Error decodificando el archivo:', error);
+      text = 'Error al procesar el contenido del archivo';
+    }
+
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
-        filename: file.name,
-        file_path: filePath,  // Agregamos el file_path requerido
+        filename: sanitizedName,
+        file_path: filePath,
         content_type: file.type,
         status: 'processing',
       })
@@ -55,9 +67,6 @@ serve(async (req) => {
     }
 
     console.log('Documento creado:', document);
-
-    // Procesar el contenido del archivo (ejemplo simplificado)
-    const text = await file.text();
     console.log('Texto extraído, longitud:', text.length);
 
     // Actualizar el documento con el texto procesado
@@ -96,7 +105,9 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error en process-document:', error);
     return new Response(
-      JSON.stringify({ error: error.message }), 
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }), 
       { 
         status: 500,
         headers: { 
