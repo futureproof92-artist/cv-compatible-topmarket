@@ -1,7 +1,6 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
-import { Base64 } from 'https://deno.land/x/bb64@1.1.0/mod.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9,7 +8,6 @@ const corsHeaders = {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
@@ -22,18 +20,14 @@ serve(async (req) => {
       throw new Error('No file uploaded')
     }
 
-    // Create Supabase client
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Get file details
     const fileName = file.name
     const contentType = file.type
     const fileExtension = fileName.split('.').pop()?.toLowerCase()
-
-    // Generate a unique file path
     const filePath = `${crypto.randomUUID()}.${fileExtension}`
 
     // Upload file to Storage
@@ -64,23 +58,25 @@ serve(async (req) => {
       throw new Error(`Failed to create document record: ${insertError.message}`)
     }
 
-    // Get the uploaded file URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('documents')
-      .getPublicUrl(filePath)
+    // If the file is an image, trigger image processing
+    if (contentType.startsWith('image/')) {
+      console.log('Processing image document:', documentData.id)
+      const { error: processError } = await supabase.functions.invoke('process-image', {
+        body: {
+          documentId: documentData.id,
+          imageUrl: filePath
+        }
+      })
 
-    console.log('Document processed successfully:', {
-      id: documentData.id,
-      filename: fileName,
-      contentType: contentType,
-      status: 'uploaded'
-    })
+      if (processError) {
+        console.error('Error triggering image processing:', processError)
+      }
+    }
 
     return new Response(
       JSON.stringify({
-        message: 'File uploaded and processed successfully',
-        document: documentData,
-        url: publicUrl
+        message: 'File uploaded successfully',
+        document: documentData
       }),
       { 
         headers: { 
