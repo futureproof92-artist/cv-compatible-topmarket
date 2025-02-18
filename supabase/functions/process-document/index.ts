@@ -25,6 +25,11 @@ serve(async (req) => {
 
     console.log('Archivo recibido:', file.name);
 
+    // Generar un file_path único
+    const fileExt = file.name.split('.').pop() || '';
+    const filePath = `${crypto.randomUUID()}.${fileExt}`;
+    console.log('File path generado:', filePath);
+
     // Crear el registro del documento en la base de datos
     const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
     
@@ -37,6 +42,7 @@ serve(async (req) => {
       .from('documents')
       .insert({
         filename: file.name,
+        file_path: filePath,  // Agregamos el file_path requerido
         content_type: file.type,
         status: 'processing',
       })
