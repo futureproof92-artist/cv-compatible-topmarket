@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -25,6 +24,7 @@ const Index = () => {
   const [processedTexts, setProcessedTexts] = useState<{[key: string]: string}>({});
   const [loadingTexts, setLoadingTexts] = useState<{[key: string]: boolean}>({});
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [documentIds, setDocumentIds] = useState<{[key: string]: string}>({});
 
   const handleFilesAccepted = useCallback((acceptedFiles: File[], processedData?: any) => {
     setFiles(prev => [...prev, ...acceptedFiles]);
@@ -35,6 +35,11 @@ const Index = () => {
     
     if (processedData) {
       const documentId = processedData.document.id;
+      setDocumentIds(prev => ({
+        ...prev,
+        [acceptedFiles[0].name]: documentId
+      }));
+      
       setLoadingTexts(prev => ({...prev, [documentId]: true}));
       
       const checkProcessing = async () => {
@@ -83,7 +88,6 @@ const Index = () => {
           });
         }
 
-        // Si todos los archivos están procesados, establecer progreso al 100%
         if (processedCount === totalFiles) {
           setUploadProgress(100);
         }
@@ -99,7 +103,15 @@ const Index = () => {
   }, [toast]);
 
   const removeFile = (index: number) => {
+    const fileToRemove = files[index];
+    const documentId = documentIds[fileToRemove.name];
+    
     setFiles(files.filter((_, i) => i !== index));
+    setDocumentIds(prev => {
+      const newIds = { ...prev };
+      delete newIds[fileToRemove.name];
+      return newIds;
+    });
   };
 
   const isValidForAnalysis = files.length > 0 && requirements.title && requirements.skills.length > 0;
@@ -109,9 +121,14 @@ const Index = () => {
     try {
       const analysisResults = [];
       
-      for (const [index, file] of files.entries()) {
-        const cvText = processedTexts[index];
-        if (!cvText) continue;
+      for (const file of files) {
+        const documentId = documentIds[file.name];
+        const cvText = processedTexts[documentId];
+        
+        if (!cvText) {
+          console.log(`No text found for file: ${file.name}, documentId: ${documentId}`);
+          continue;
+        }
 
         try {
           const { data: analysis, error } = await supabase.functions.invoke('analyze-cv', {
