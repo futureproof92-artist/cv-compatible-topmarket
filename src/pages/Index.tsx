@@ -1,10 +1,10 @@
-
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, Upload, Check, X, Search, Loader2, FileSearch } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 import UploadZone from '@/components/UploadZone';
 import RequirementsForm from '@/components/RequirementsForm';
 
@@ -30,7 +30,6 @@ const Index = () => {
       const documentId = processedData.document.id;
       setLoadingTexts(prev => ({...prev, [documentId]: true}));
       
-      // Poll for processed text
       const checkProcessing = async () => {
         try {
           const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/documents?id=eq.${documentId}&select=processed_text,status`, {
@@ -94,27 +93,50 @@ const Index = () => {
   const handleAnalyze = async () => {
     setIsAnalyzing(true);
     try {
-      // Aquí iría la lógica de análisis
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulación de análisis
+      const analysisResults = [];
       
-      // Simulación de resultados
+      for (const [index, file] of files.entries()) {
+        const cvText = processedTexts[index];
+        if (!cvText) continue;
+
+        try {
+          const { data: analysis, error } = await supabase.functions.invoke('analyze-cv', {
+            body: { cvText, requirements },
+          });
+
+          if (error) throw error;
+
+          analysisResults.push({
+            filename: file.name,
+            match: analysis.match_percentage,
+            skills: requirements.skills.map(skill => ({
+              name: skill,
+              found: analysis.skills_found.includes(skill)
+            })),
+            experience_summary: analysis.experience_summary,
+            recommendation: analysis.recommendation
+          });
+        } catch (error) {
+          console.error(`Error analyzing ${file.name}:`, error);
+          toast({
+            title: `Error al analizar ${file.name}`,
+            description: "Hubo un problema al analizar este CV.",
+            variant: "destructive"
+          });
+        }
+      }
+
       setResults({
-        analyzed: files.length,
-        matches: files.map(file => ({
-          filename: file.name,
-          match: Math.round(Math.random() * 100),
-          skills: requirements.skills.map(skill => ({
-            name: skill,
-            found: Math.random() > 0.5
-          }))
-        }))
+        analyzed: analysisResults.length,
+        matches: analysisResults
       });
 
       toast({
         title: "Análisis completado",
-        description: `Se han analizado ${files.length} CV(s) exitosamente.`
+        description: `Se han analizado ${analysisResults.length} CV(s) exitosamente.`
       });
     } catch (error) {
+      console.error('Error en el análisis:', error);
       toast({
         title: "Error en el análisis",
         description: "Hubo un problema al analizar los CVs. Por favor, intenta nuevamente.",
@@ -224,13 +246,13 @@ const Index = () => {
               className="mt-12 bg-white rounded-lg shadow-sm border p-6"
             >
               <h2 className="text-2xl font-semibold mb-6">Resultados del Análisis</h2>
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {results.matches.map((match: any, index: number) => (
                   <div
                     key={index}
                     className="border rounded-lg p-4 hover:bg-gray-50 transition-colors"
                   >
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-4">
                       <h3 className="text-lg font-medium">{match.filename}</h3>
                       <span className={`text-lg font-semibold ${
                         match.match >= 75 ? 'text-green-600' :
@@ -240,23 +262,40 @@ const Index = () => {
                         {match.match}% de coincidencia
                       </span>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {match.skills.map((skill: any, skillIndex: number) => (
-                        <span
-                          key={skillIndex}
-                          className={`px-3 py-1 rounded-full text-sm ${
-                            skill.found
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}
-                        >
-                          {skill.name}
-                          {skill.found ? 
-                            <Check className="inline-block ml-1 h-4 w-4" /> : 
-                            <X className="inline-block ml-1 h-4 w-4" />
-                          }
-                        </span>
-                      ))}
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-700 mb-2">Habilidades Requeridas:</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {match.skills.map((skill: any, skillIndex: number) => (
+                            <span
+                              key={skillIndex}
+                              className={`px-3 py-1 rounded-full text-sm ${
+                                skill.found
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
+                              {skill.name}
+                              {skill.found ? 
+                                <Check className="inline-block ml-1 h-4 w-4" /> : 
+                                <X className="inline-block ml-1 h-4 w-4" />
+                              }
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {match.experience_summary && (
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">Resumen de Experiencia:</h4>
+                          <p className="text-sm text-gray-600">{match.experience_summary}</p>
+                        </div>
+                      )}
+                      {match.recommendation && (
+                        <div>
+                          <h4 className="text-sm font-medium text-gray-700 mb-2">Recomendación:</h4>
+                          <p className="text-sm text-gray-600">{match.recommendation}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
