@@ -89,7 +89,10 @@ const Index = () => {
       const poll = async () => {
         let attempts = 0;
         const maxAttempts = 30;
-        setUploadProgress(10); // Indicador inicial de progreso
+        let currentProgress = 10;
+        setUploadProgress(currentProgress);
+        
+        const waitTimes = [1000, 2000, 3000, 5000, 8000]; // Tiempos de espera exponenciales
         
         while (attempts < maxAttempts) {
           const isProcessed = await checkProcessing();
@@ -97,8 +100,14 @@ const Index = () => {
             setUploadProgress(100);
             break;
           }
-          setUploadProgress(10 + (90 * attempts / maxAttempts)); // Progreso gradual
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Incremento determinístico del progreso
+          currentProgress = Math.min(90, 10 + Math.floor((attempts + 1) * (80 / maxAttempts)));
+          setUploadProgress(currentProgress);
+          
+          // Tiempo de espera exponencial
+          const waitTime = waitTimes[Math.min(attempts, waitTimes.length - 1)];
+          await new Promise(resolve => setTimeout(resolve, waitTime));
           attempts++;
         }
         
@@ -107,7 +116,7 @@ const Index = () => {
           setUploadProgress(0);
           toast({
             title: "Tiempo de procesamiento excedido",
-            description: "No se pudo obtener el texto procesado. Por favor, intente nuevamente.",
+            description: "Por favor, inténtelo de nuevo más tarde. El servidor podría estar ocupado.",
             variant: "destructive"
           });
         }
