@@ -3,20 +3,68 @@ import { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 
 interface UploadZoneProps {
   onFilesAccepted: (files: File[]) => void;
 }
 
 const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    onFilesAccepted(acceptedFiles);
+  const { toast } = useToast();
+
+  const processFile = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('process-document', {
+        body: formData,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Archivo procesado exitosamente",
+        description: `Se ha procesado el archivo ${file.name}`,
+      });
+
+      return data;
+    } catch (error) {
+      console.error('Error processing file:', error);
+      toast({
+        title: "Error al procesar el archivo",
+        description: "Hubo un problema al procesar el archivo. Por favor, intenta nuevamente.",
+        variant: "destructive"
+      });
+      throw error;
+    }
+  };
+
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    const processedFiles = [];
+    for (const file of acceptedFiles) {
+      try {
+        await processFile(file);
+        processedFiles.push(file);
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+      }
+    }
+    
+    if (processedFiles.length > 0) {
+      onFilesAccepted(processedFiles);
+    }
   }, [onFilesAccepted]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'application/pdf': ['.pdf']
+      'application/pdf': ['.pdf'],
+      'application/msword': ['.doc'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg']
     },
     multiple: true
   });
@@ -48,11 +96,14 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
           <p className="text-lg font-medium text-gray-700">
             {isDragActive 
               ? "Suelta los archivos aquí" 
-              : "Arrastra y suelta los CVs aquí"
+              : "Arrastra y suelta los archivos aquí"
             }
           </p>
           <p className="text-sm text-gray-500">
             o haz clic para buscar
+          </p>
+          <p className="text-xs text-gray-400">
+            Formatos soportados: PDF, DOC, DOCX, PNG, JPG
           </p>
         </div>
       </motion.div>
