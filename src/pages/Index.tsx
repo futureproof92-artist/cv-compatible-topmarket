@@ -27,23 +27,41 @@ const Index = () => {
   const [documentIds, setDocumentIds] = useState<{[key: string]: string}>({});
 
   const handleFilesAccepted = useCallback((acceptedFiles: File[], processedData?: any) => {
-    setFiles(prev => [...prev, ...acceptedFiles]);
+    const newFiles = acceptedFiles.filter(file => 
+      !files.some(existingFile => existingFile.name === file.name)
+    );
+
+    if (newFiles.length === 0) {
+      toast({
+        title: "Archivos duplicados",
+        description: "Los archivos ya han sido agregados.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setFiles(prev => [...prev, ...newFiles]);
     setUploadProgress(0);
+    console.log('Archivos aceptados:', newFiles.map(f => f.name));
     
-    const totalFiles = acceptedFiles.length;
-    let processedCount = 0;
-    
-    if (processedData) {
+    if (processedData?.document?.id) {
       const documentId = processedData.document.id;
-      setDocumentIds(prev => ({
-        ...prev,
-        [acceptedFiles[0].name]: documentId
-      }));
+      console.log('Document ID recibido:', documentId);
+      
+      setDocumentIds(prev => {
+        const updated = {
+          ...prev,
+          [newFiles[0].name]: documentId
+        };
+        console.log('Nuevo estado de documentIds:', updated);
+        return updated;
+      });
       
       setLoadingTexts(prev => ({...prev, [documentId]: true}));
       
       const checkProcessing = async () => {
         try {
+          console.log('Verificando procesamiento para documentId:', documentId);
           const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/documents?id=eq.${documentId}&select=processed_text,status`, {
             headers: {
               'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
@@ -52,12 +70,12 @@ const Index = () => {
           });
           
           const [data] = await response.json();
+          console.log('Respuesta de procesamiento:', data);
           
           if (data?.status === 'processed' && data?.processed_text) {
             setProcessedTexts(prev => ({...prev, [documentId]: data.processed_text}));
             setLoadingTexts(prev => ({...prev, [documentId]: false}));
-            processedCount++;
-            setUploadProgress((processedCount / totalFiles) * 100);
+            setUploadProgress(100);
             return true;
           }
           
@@ -71,25 +89,27 @@ const Index = () => {
       const poll = async () => {
         let attempts = 0;
         const maxAttempts = 30;
+        setUploadProgress(10); // Indicador inicial de progreso
         
         while (attempts < maxAttempts) {
           const isProcessed = await checkProcessing();
-          if (isProcessed) break;
+          if (isProcessed) {
+            setUploadProgress(100);
+            break;
+          }
+          setUploadProgress(10 + (90 * attempts / maxAttempts)); // Progreso gradual
           await new Promise(resolve => setTimeout(resolve, 1000));
           attempts++;
         }
         
         if (attempts >= maxAttempts) {
           setLoadingTexts(prev => ({...prev, [documentId]: false}));
+          setUploadProgress(0);
           toast({
             title: "Tiempo de procesamiento excedido",
             description: "No se pudo obtener el texto procesado. Por favor, intente nuevamente.",
             variant: "destructive"
           });
-        }
-
-        if (processedCount === totalFiles) {
-          setUploadProgress(100);
         }
       };
 
@@ -98,13 +118,15 @@ const Index = () => {
 
     toast({
       title: "Archivos subidos exitosamente",
-      description: `Se han agregado ${acceptedFiles.length} archivo(s).`
+      description: `Se han agregado ${newFiles.length} archivo(s).`
     });
-  }, [toast]);
+  }, [files, toast]);
 
   const removeFile = (index: number) => {
     const fileToRemove = files[index];
     const documentId = documentIds[fileToRemove.name];
+    
+    console.log('Removiendo archivo:', fileToRemove.name, 'con documentId:', documentId);
     
     setFiles(files.filter((_, i) => i !== index));
     setDocumentIds(prev => {
@@ -112,6 +134,19 @@ const Index = () => {
       delete newIds[fileToRemove.name];
       return newIds;
     });
+    
+    if (documentId) {
+      setProcessedTexts(prev => {
+        const newTexts = { ...prev };
+        delete newTexts[documentId];
+        return newTexts;
+      });
+      setLoadingTexts(prev => {
+        const newLoadings = { ...prev };
+        delete newLoadings[documentId];
+        return newLoadings;
+      });
+    }
   };
 
   const isValidForAnalysis = files.length > 0 && requirements.title && requirements.skills.length > 0;
@@ -182,8 +217,12 @@ const Index = () => {
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       <div className="max-w-6xl mx-auto px-4 py-12">
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl md:text-6xl">Checador de CV's</h1>
-          <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl font-normal">Sube CVs y compáralos con los requisitos del puesto usando nuestra IA</p>
+          <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl md:text-6xl">
+            Checador de CV's
+          </h1>
+          <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl font-normal">
+            Sube CVs y compáralos con los requisitos del puesto usando nuestra IA
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -200,20 +239,22 @@ const Index = () => {
                 >
                   <h3 className="text-lg font-medium mb-4">Archivos Subidos</h3>
                   
-                  <div className="mb-4">
-                    <div className="flex justify-between text-sm text-gray-600 mb-2">
-                      <span>Progreso de procesamiento</span>
-                      <span>{Math.round(uploadProgress)}%</span>
+                  {uploadProgress > 0 && (
+                    <div className="mb-4">
+                      <div className="flex justify-between text-sm text-gray-600 mb-2">
+                        <span>Progreso de procesamiento</span>
+                        <span>{Math.round(uploadProgress)}%</span>
+                      </div>
+                      <Progress 
+                        value={uploadProgress} 
+                        className="h-2"
+                      />
                     </div>
-                    <Progress 
-                      value={uploadProgress} 
-                      className="h-2"
-                    />
-                  </div>
+                  )}
                   
                   <div className="space-y-4">
                     {files.map((file, index) => (
-                      <div key={`${file.name}-${index}`}>
+                      <div key={`${file.name}-${index}`} className="space-y-2">
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
                           <div className="flex items-center space-x-3">
                             <FileText className="h-5 w-5 text-blue-500" />
@@ -224,19 +265,18 @@ const Index = () => {
                           </button>
                         </div>
                         
-                        {loadingTexts[index] && (
-                          <div className="mt-2 p-3 bg-gray-50 rounded-md flex items-center space-x-2 text-sm text-gray-500">
+                        {loadingTexts[documentIds[file.name]] && (
+                          <div className="p-3 bg-gray-50 rounded-md flex items-center space-x-2 text-sm text-gray-500">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             <span>Procesando texto...</span>
                           </div>
                         )}
                         
-                        {processedTexts[index] && (
+                        {processedTexts[documentIds[file.name]] && (
                           <motion.div 
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
                             exit={{ opacity: 0, height: 0 }}
-                            className="mt-2"
                           >
                             <div className="p-3 bg-gray-50 rounded-md">
                               <div className="flex items-center space-x-2 mb-2 text-sm text-gray-700">
@@ -244,7 +284,7 @@ const Index = () => {
                                 <span className="font-medium">Texto Extraído:</span>
                               </div>
                               <div className="text-sm text-gray-600 whitespace-pre-wrap max-h-40 overflow-y-auto">
-                                {processedTexts[index]}
+                                {processedTexts[documentIds[file.name]]}
                               </div>
                             </div>
                           </motion.div>
