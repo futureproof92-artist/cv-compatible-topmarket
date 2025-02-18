@@ -22,8 +22,8 @@ const Index = () => {
   const handleFilesAccepted = useCallback((acceptedFiles: File[]) => {
     setFiles(prev => [...prev, ...acceptedFiles]);
     toast({
-      title: "Files uploaded successfully",
-      description: `${acceptedFiles.length} file(s) have been added.`,
+      title: "Archivos subidos exitosamente",
+      description: `Se han agregado ${acceptedFiles.length} archivo(s).`,
     });
   }, [toast]);
 
@@ -36,10 +36,10 @@ const Index = () => {
       <div className="max-w-6xl mx-auto px-4 py-12">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl md:text-6xl">
-            CV Compatibility Checker
+            Analizador de Compatibilidad de CV
           </h1>
           <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
-            Upload CVs and match them against job requirements with our intelligent analysis system.
+            Sube CVs y compáralos con los requisitos del puesto usando nuestro sistema de análisis inteligente.
           </p>
         </div>
 
@@ -55,7 +55,7 @@ const Index = () => {
                   exit={{ opacity: 0, y: -20 }}
                   className="bg-white rounded-lg shadow-sm border p-4"
                 >
-                  <h3 className="text-lg font-medium mb-4">Uploaded Files</h3>
+                  <h3 className="text-lg font-medium mb-4">Archivos Subidos</h3>
                   <div className="space-y-2">
                     {files.map((file, index) => (
                       <div

@@ -47,12 +47,12 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
         <div className="space-y-2">
           <p className="text-lg font-medium text-gray-700">
             {isDragActive 
-              ? "Drop your files here" 
-              : "Drag & drop CV files here"
+              ? "Suelta los archivos aquí" 
+              : "Arrastra y suelta los CVs aquí"
             }
           </p>
           <p className="text-sm text-gray-500">
-            or click to browse
+            o haz clic para buscar
           </p>
         </div>
       </motion.div>

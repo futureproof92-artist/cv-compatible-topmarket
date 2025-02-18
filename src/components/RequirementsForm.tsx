@@ -40,27 +40,27 @@ const RequirementsForm = ({ requirements, setRequirements }: RequirementsFormPro
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-6 space-y-6">
-      <h3 className="text-lg font-medium mb-4">Job Requirements</h3>
+      <h3 className="text-lg font-medium mb-4">Requisitos del Puesto</h3>
       
       <div className="space-y-4">
         <div>
-          <Label htmlFor="title">Job Title</Label>
+          <Label htmlFor="title">Título del Puesto</Label>
           <Input
             id="title"
             value={requirements.title}
             onChange={(e) => setRequirements({ ...requirements, title: e.target.value })}
-            placeholder="e.g., Senior Software Engineer"
+            placeholder="ej., Ingeniero de Software Senior"
           />
         </div>
 
         <div>
-          <Label htmlFor="skills">Required Skills</Label>
+          <Label htmlFor="skills">Habilidades Requeridas</Label>
           <div className="flex space-x-2 mb-2">
             <Input
               id="skills"
               value={skillInput}
               onChange={(e) => setSkillInput(e.target.value)}
-              placeholder="e.g., Python"
+              placeholder="ej., Python"
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
@@ -73,7 +73,7 @@ const RequirementsForm = ({ requirements, setRequirements }: RequirementsFormPro
               onClick={handleAddSkill}
               variant="secondary"
             >
-              Add
+              Agregar
             </Button>
           </div>
           
@@ -97,32 +97,32 @@ const RequirementsForm = ({ requirements, setRequirements }: RequirementsFormPro
         </div>
 
         <div>
-          <Label htmlFor="experience">Required Experience</Label>
+          <Label htmlFor="experience">Experiencia Requerida</Label>
           <Input
             id="experience"
             value={requirements.experience}
             onChange={(e) => setRequirements({ ...requirements, experience: e.target.value })}
-            placeholder="e.g., 5+ years"
+            placeholder="ej., 5+ años"
           />
         </div>
 
         <div>
-          <Label htmlFor="location">Location</Label>
+          <Label htmlFor="location">Ubicación</Label>
           <Input
             id="location"
             value={requirements.location}
             onChange={(e) => setRequirements({ ...requirements, location: e.target.value })}
-            placeholder="e.g., New York"
+            placeholder="ej., Ciudad de México"
           />
         </div>
 
         <div>
-          <Label htmlFor="education">Education Requirements</Label>
+          <Label htmlFor="education">Requisitos de Educación</Label>
           <Textarea
             id="education"
             value={requirements.education}
             onChange={(e) => setRequirements({ ...requirements, education: e.target.value })}
-            placeholder="e.g., Bachelor's degree in Computer Science"
+            placeholder="ej., Licenciatura en Ingeniería Informática"
             rows={3}
           />
         </div>
