@@ -16,14 +16,24 @@ serve(async (req) => {
 
   try {
     console.log('Iniciando procesamiento de documento');
-    const formData = await req.formData();
-    const file = formData.get('file') as File;
     
-    if (!file) {
-      throw new Error('No file provided');
+    // Verificar si el request es FormData
+    if (!req.body) {
+      throw new Error('Request body is empty');
     }
 
-    console.log('Archivo recibido:', file.name);
+    const formData = await req.formData();
+    const file = formData.get('file');
+    
+    if (!file || !(file instanceof File)) {
+      throw new Error('Invalid or missing file in request');
+    }
+
+    console.log('Archivo recibido:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
 
     // Generar un file_path único y sanitizado
     const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
@@ -34,22 +44,32 @@ serve(async (req) => {
     // Crear el registro del documento en la base de datos
     const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
     
-    const supabaseAdmin = createClient(
-      SUPABASE_URL ?? '',
-      SUPABASE_SERVICE_ROLE_KEY ?? '',
-    );
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error('Missing required environment variables');
+    }
+
+    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Convertir el archivo a texto de manera segura
     let text;
     try {
-      const arrayBuffer = await file.arrayBuffer();
+      const buffer = await file.arrayBuffer();
+      console.log('Buffer obtenido, tamaño:', buffer.byteLength);
+      
       const decoder = new TextDecoder('utf-8');
-      text = decoder.decode(arrayBuffer);
+      text = decoder.decode(buffer);
+      console.log('Texto decodificado, longitud:', text.length);
+      
+      if (!text) {
+        throw new Error('No text content extracted from file');
+      }
     } catch (error) {
-      console.error('Error decodificando el archivo:', error);
-      text = 'Error al procesar el contenido del archivo';
+      console.error('Error procesando contenido del archivo:', error);
+      throw new Error(`Error processing file content: ${error.message}`);
     }
 
+    // Insertar documento
+    console.log('Insertando documento en la base de datos...');
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
@@ -63,13 +83,13 @@ serve(async (req) => {
 
     if (insertError) {
       console.error('Error insertando documento:', insertError);
-      throw insertError;
+      throw new Error(`Database insert error: ${insertError.message}`);
     }
 
     console.log('Documento creado:', document);
-    console.log('Texto extraído, longitud:', text.length);
 
     // Actualizar el documento con el texto procesado
+    console.log('Actualizando documento con texto procesado...');
     const { error: updateError } = await supabaseAdmin
       .from('documents')
       .update({
@@ -81,7 +101,7 @@ serve(async (req) => {
 
     if (updateError) {
       console.error('Error actualizando documento:', updateError);
-      throw updateError;
+      throw new Error(`Database update error: ${updateError.message}`);
     }
 
     console.log('Documento procesado exitosamente');
@@ -103,10 +123,16 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error en process-document:', error);
+    console.error('Error en process-document:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+
     return new Response(
       JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error.message || 'An unexpected error occurred',
+        details: error.stack || 'No stack trace available'
       }), 
       { 
         status: 500,
