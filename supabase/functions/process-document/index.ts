@@ -16,6 +16,47 @@ function sanitizeText(text: string): string {
     .replace(/[\uD800-\uDFFF]/g, ''); // Remover surrogate pairs inválidos
 }
 
+async function processDocumentText(supabaseAdmin: any, document: any, file: File) {
+  try {
+    const buffer = await file.arrayBuffer();
+    console.log('Buffer obtenido, tamaño:', buffer.byteLength);
+    
+    const decoder = new TextDecoder('utf-8', { fatal: false });
+    const rawText = decoder.decode(buffer);
+    const text = sanitizeText(rawText);
+    
+    console.log('Texto decodificado y sanitizado, longitud:', text.length);
+    
+    if (!text) {
+      throw new Error('No text content extracted from file');
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from('documents')
+      .update({
+        processed_text: text,
+        status: 'processed',
+        processed_at: new Date().toISOString(),
+      })
+      .eq('id', document.id);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    console.log('Documento procesado exitosamente:', document.id);
+  } catch (error) {
+    console.error('Error procesando documento:', error);
+    await supabaseAdmin
+      .from('documents')
+      .update({
+        status: 'error',
+        error: error.message,
+      })
+      .eq('id', document.id);
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -57,26 +98,6 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Convertir el archivo a texto de manera segura y sanitizar
-    let text;
-    try {
-      const buffer = await file.arrayBuffer();
-      console.log('Buffer obtenido, tamaño:', buffer.byteLength);
-      
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      const rawText = decoder.decode(buffer);
-      text = sanitizeText(rawText);
-      
-      console.log('Texto decodificado y sanitizado, longitud:', text.length);
-      
-      if (!text) {
-        throw new Error('No text content extracted from file');
-      }
-    } catch (error) {
-      console.error('Error procesando contenido del archivo:', error);
-      throw new Error(`Error processing file content: ${error.message}`);
-    }
-
     // Insertar documento
     console.log('Insertando documento en la base de datos...');
     const { data: document, error: insertError } = await supabaseAdmin
@@ -95,40 +116,8 @@ serve(async (req) => {
       throw new Error(`Database insert error: ${insertError.message}`);
     }
 
-    console.log('Documento creado:', document);
-
-    // Actualizar el documento con el texto procesado
-    console.log('Actualizando documento con texto procesado...');
-    try {
-      const { error: updateError } = await supabaseAdmin
-        .from('documents')
-        .update({
-          processed_text: text,
-          status: 'processed',
-          processed_at: new Date().toISOString(),
-        })
-        .eq('id', document.id);
-
-      if (updateError) {
-        console.error('Error actualizando documento:', updateError);
-        throw new Error(`Database update error: ${updateError.message}`);
-      }
-    } catch (updateError) {
-      console.error('Error crítico actualizando documento:', updateError);
-      
-      // Actualizar solo el estado para marcar el error
-      await supabaseAdmin
-        .from('documents')
-        .update({
-          status: 'error',
-          error: 'Error processing document text',
-        })
-        .eq('id', document.id);
-        
-      throw new Error('Failed to update document with processed text');
-    }
-
-    console.log('Documento procesado exitosamente');
+    // Procesar el documento en segundo plano
+    EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, file));
 
     return new Response(
       JSON.stringify({ 
@@ -136,7 +125,7 @@ serve(async (req) => {
         document: { 
           id: document.id,
           filename: document.filename,
-          status: 'processed'
+          status: 'processing'
         } 
       }),
       { 
