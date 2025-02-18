@@ -8,6 +8,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function sanitizeText(text: string): string {
+  // Reemplazar caracteres Unicode no estándar y secuencias de escape
+  return text
+    .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\uFFFD\uFFFE\uFFFF]/g, '') // Remover caracteres de control
+    .replace(/\\u[0-9a-fA-F]{4}/g, '') // Remover secuencias de escape Unicode
+    .replace(/[\uD800-\uDFFF]/g, ''); // Remover surrogate pairs inválidos
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -17,7 +25,6 @@ serve(async (req) => {
   try {
     console.log('Iniciando procesamiento de documento');
     
-    // Verificar si el request es FormData
     if (!req.body) {
       throw new Error('Request body is empty');
     }
@@ -50,15 +57,17 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Convertir el archivo a texto de manera segura
+    // Convertir el archivo a texto de manera segura y sanitizar
     let text;
     try {
       const buffer = await file.arrayBuffer();
       console.log('Buffer obtenido, tamaño:', buffer.byteLength);
       
-      const decoder = new TextDecoder('utf-8');
-      text = decoder.decode(buffer);
-      console.log('Texto decodificado, longitud:', text.length);
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      const rawText = decoder.decode(buffer);
+      text = sanitizeText(rawText);
+      
+      console.log('Texto decodificado y sanitizado, longitud:', text.length);
       
       if (!text) {
         throw new Error('No text content extracted from file');
@@ -90,18 +99,33 @@ serve(async (req) => {
 
     // Actualizar el documento con el texto procesado
     console.log('Actualizando documento con texto procesado...');
-    const { error: updateError } = await supabaseAdmin
-      .from('documents')
-      .update({
-        processed_text: text,
-        status: 'processed',
-        processed_at: new Date().toISOString(),
-      })
-      .eq('id', document.id);
+    try {
+      const { error: updateError } = await supabaseAdmin
+        .from('documents')
+        .update({
+          processed_text: text,
+          status: 'processed',
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', document.id);
 
-    if (updateError) {
-      console.error('Error actualizando documento:', updateError);
-      throw new Error(`Database update error: ${updateError.message}`);
+      if (updateError) {
+        console.error('Error actualizando documento:', updateError);
+        throw new Error(`Database update error: ${updateError.message}`);
+      }
+    } catch (updateError) {
+      console.error('Error crítico actualizando documento:', updateError);
+      
+      // Actualizar solo el estado para marcar el error
+      await supabaseAdmin
+        .from('documents')
+        .update({
+          status: 'error',
+          error: 'Error processing document text',
+        })
+        .eq('id', document.id);
+        
+      throw new Error('Failed to update document with processed text');
     }
 
     console.log('Documento procesado exitosamente');
