@@ -178,7 +178,8 @@ const Index = () => {
     }
   };
 
-  return <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       <div className="max-w-6xl mx-auto px-4 py-12">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold tracking-tight text-gray-900 sm:text-5xl md:text-6xl">Checador de CV's</h1>
@@ -199,15 +200,16 @@ const Index = () => {
                 >
                   <h3 className="text-lg font-medium mb-4">Archivos Subidos</h3>
                   
-                  {uploadProgress < 100 && uploadProgress > 0 && (
-                    <div className="mb-4">
-                      <div className="flex justify-between text-sm text-gray-600 mb-2">
-                        <span>Progreso de carga</span>
-                        <span>{Math.round(uploadProgress)}%</span>
-                      </div>
-                      <Progress value={uploadProgress} className="h-2" />
+                  <div className="mb-4">
+                    <div className="flex justify-between text-sm text-gray-600 mb-2">
+                      <span>Progreso de procesamiento</span>
+                      <span>{Math.round(uploadProgress)}%</span>
                     </div>
-                  )}
+                    <Progress 
+                      value={uploadProgress} 
+                      className="h-2"
+                    />
+                  </div>
                   
                   <div className="space-y-4">
                     {files.map((file, index) => (
@@ -348,7 +350,8 @@ const Index = () => {
           )}
         </AnimatePresence>
       </div>
-    </div>;
+    </div>
+  );
 };
 
 export default Index;
