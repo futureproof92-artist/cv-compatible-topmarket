@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 const Auth = () => {
@@ -43,13 +43,15 @@ const Auth = () => {
     }
   };
 
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSignUp = async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
       });
 
       if (error) throw error;
@@ -58,6 +60,10 @@ const Auth = () => {
         title: "Registro exitoso",
         description: "Por favor verifica tu correo electrónico",
       });
+      
+      if (data.session) {
+        navigate("/");
+      }
     } catch (error: any) {
       toast({
         title: "Error al registrarse",
@@ -79,7 +85,10 @@ const Auth = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form className="space-y-4" onSubmit={(e) => {
+            e.preventDefault();
+            handleLogin(e);
+          }}>
             <div className="space-y-2">
               <Input
                 type="email"
@@ -103,7 +112,10 @@ const Auth = () => {
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={handleSignUp}
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleSignUp();
+                }}
                 disabled={loading}
                 className="flex-1"
               >
