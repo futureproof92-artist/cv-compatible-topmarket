@@ -5,11 +5,27 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
+// Configuración de CORS mejorada
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin',
   'Access-Control-Max-Age': '86400',
+  'Access-Control-Allow-Credentials': 'true',
+};
+
+// Función para logging consistente
+const log = {
+  info: (message: string, data?: any) => {
+    console.log(`[INFO] ${message}`, data ? JSON.stringify(data) : '');
+  },
+  error: (message: string, error: any) => {
+    console.error(`[ERROR] ${message}`, {
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause
+    });
+  }
 };
 
 async function convertPDFPageToImage(pdfBuffer: ArrayBuffer, pageNum: number): Promise<Uint8Array> {
@@ -139,27 +155,33 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
 }
 
 serve(async (req) => {
-  console.log(`Recibida petición ${req.method}`);
-  
+  log.info(`Recibida petición ${req.method}`);
+
+  // Manejo específico del preflight request
   if (req.method === 'OPTIONS') {
-    console.log('Respondiendo a OPTIONS request');
+    log.info('Procesando OPTIONS request (CORS preflight)');
     return new Response(null, {
-      status: 204,
-      headers: corsHeaders
+      status: 204, // No Content
+      headers: {
+        ...corsHeaders,
+        'Content-Length': '0',
+        'Content-Type': 'text/plain'
+      }
     });
   }
 
   try {
+    // Validación del método HTTP
     if (req.method !== 'POST') {
       throw new Error(`Método ${req.method} no soportado`);
     }
 
-    console.log('Verificando body de la petición');
+    log.info('Verificando contenido de la petición');
     if (!req.body) {
       throw new Error('Request body está vacío');
     }
 
-    console.log('Extrayendo FormData');
+    // Procesamiento del FormData
     const formData = await req.formData();
     const file = formData.get('file');
     
@@ -167,26 +189,28 @@ serve(async (req) => {
       throw new Error('Archivo inválido o faltante en la petición');
     }
 
-    console.log('Archivo recibido:', {
-      name: file.name,
-      type: file.type,
-      size: file.size
+    log.info('Archivo recibido', {
+      nombre: file.name,
+      tipo: file.type,
+      tamaño: file.size
     });
 
+    // Procesamiento del nombre del archivo
     const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
     const filePath = `${sanitizedName}_${crypto.randomUUID()}.${fileExt}`;
 
+    // Validación de variables de entorno
     const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
-    
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('Faltan variables de entorno requeridas');
     }
 
-    console.log('Inicializando cliente Supabase');
+    log.info('Inicializando cliente Supabase');
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    console.log('Insertando documento en la base de datos');
+    // Inserción en base de datos
+    log.info('Insertando documento en base de datos');
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
@@ -199,11 +223,11 @@ serve(async (req) => {
       .single();
 
     if (insertError) {
-      console.error('Error insertando documento:', insertError);
+      log.error('Error en inserción de documento', insertError);
       throw new Error(`Error en base de datos: ${insertError.message}`);
     }
 
-    console.log('Iniciando procesamiento asíncrono');
+    log.info('Iniciando procesamiento asíncrono', { documentId: document.id });
     EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, file));
 
     return new Response(
@@ -216,14 +240,15 @@ serve(async (req) => {
         } 
       }),
       { 
+        status: 200,
         headers: { 
           ...corsHeaders,
-          'Content-Type': 'application/json' 
+          'Content-Type': 'application/json'
         } 
       }
     );
   } catch (error) {
-    console.error('Error en process-document:', error);
+    log.error('Error en process-document', error);
     return new Response(
       JSON.stringify({ 
         error: error.message || 'Error inesperado',
