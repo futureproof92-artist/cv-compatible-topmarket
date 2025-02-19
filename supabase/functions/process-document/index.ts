@@ -43,19 +43,16 @@ async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
   }
 }
 
-async function processDocumentText(supabaseAdmin: any, document: any, fileData: string) {
+async function processDocumentText(supabaseAdmin: any, document: any, file: File) {
   try {
     console.log('Iniciando procesamiento de documento:', document.filename);
-    
-    // Decodificar Base64
-    const base64Data = fileData.split(',')[1];
-    const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    const buffer = await file.arrayBuffer();
     console.log('Buffer obtenido, tamaño:', buffer.byteLength);
     
     let extractedText = '';
     
-    if (document.content_type === 'application/pdf') {
-      extractedText = await extractTextFromPDF(buffer);
+    if (file.type === 'application/pdf') {
+      extractedText = await extractTextFromPDF(new Uint8Array(buffer));
     } else {
       // Para otros tipos de archivo, intentamos decodificación simple
       const decoder = new TextDecoder('utf-8', { fatal: false });
@@ -107,19 +104,21 @@ serve(async (req) => {
       throw new Error('Request body is empty');
     }
 
-    const { filename, fileType, fileData } = await req.json();
+    const formData = await req.formData();
+    const file = formData.get('file');
     
-    if (!filename || !fileType || !fileData) {
-      throw new Error('Missing required fields in request');
+    if (!file || !(file instanceof File)) {
+      throw new Error('Invalid or missing file in request');
     }
 
-    console.log('Datos recibidos:', {
-      filename,
-      type: fileType,
+    console.log('Archivo recibido:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
     });
 
-    const fileExt = (filename.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
-    const sanitizedName = filename.replace(/[^a-zA-Z0-9]/g, '_');
+    const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
     const filePath = `${sanitizedName}_${crypto.randomUUID()}.${fileExt}`;
     console.log('File path generado:', filePath);
 
@@ -137,7 +136,7 @@ serve(async (req) => {
       .insert({
         filename: sanitizedName,
         file_path: filePath,
-        content_type: fileType,
+        content_type: file.type,
         status: 'processing',
       })
       .select()
@@ -148,7 +147,7 @@ serve(async (req) => {
       throw new Error(`Database insert error: ${insertError.message}`);
     }
 
-    EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, fileData));
+    EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, file));
 
     return new Response(
       JSON.stringify({ 

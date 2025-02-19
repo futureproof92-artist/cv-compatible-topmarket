@@ -17,29 +17,25 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     console.log('Iniciando procesamiento del archivo:', file.name);
     
     try {
-      // Convertir el archivo a Base64
-      const reader = new FileReader();
-      const base64Promise = new Promise((resolve, reject) => {
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = (error) => reject(error);
-      });
-      reader.readAsDataURL(file);
-      const base64Data = await base64Promise;
+      // Crear FormData con el archivo
+      const formData = new FormData();
+      formData.append('file', file);
 
-      console.log('Invocando función process-document...');
-      const { data, error } = await supabase.functions.invoke('process-document', {
-        body: {
-          filename: file.name,
-          fileType: file.type,
-          fileData: base64Data
-        }
+      // Llamar directamente a la URL de la función
+      const response = await fetch('https://bhergnyfmwmxjrijiwoc.supabase.co/functions/v1/process-document', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabase.auth.getSession()?.access_token}`,
+          'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
+        },
+        body: formData,
       });
 
-      if (error) {
-        console.error('Error en process-document:', error);
-        throw error;
+      if (!response.ok) {
+        throw new Error(`Error HTTP: ${response.status}`);
       }
 
+      const data = await response.json();
       console.log('Respuesta de process-document:', data);
 
       if (!data?.document?.id) {
