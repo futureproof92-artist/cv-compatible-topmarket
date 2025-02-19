@@ -2,43 +2,91 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+async function convertPDFPageToImage(pdfBuffer: ArrayBuffer, pageNum: number): Promise<Uint8Array> {
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  const page = pdfDoc.getPages()[pageNum];
+  
+  // Crear un nuevo documento PDF con solo esta página
+  const singlePagePdf = await PDFDocument.create();
+  const [copiedPage] = await singlePagePdf.copyPages(pdfDoc, [pageNum]);
+  singlePagePdf.addPage(copiedPage);
+  
+  // Convertir a PNG (formato más compatible con Vision API)
+  const pngBytes = await singlePagePdf.saveAsBase64({ dataUri: true });
+  const base64Data = pngBytes.split(',')[1];
+  return Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+}
+
+async function performOCR(imageBuffer: Uint8Array): Promise<string> {
+  try {
+    const credentials = JSON.parse(Deno.env.get("GOOGLE_CLOUD_VISION_CREDENTIALS") || "{}");
+    const client = new ImageAnnotatorClient({ credentials });
+
+    const [result] = await client.textDetection({
+      image: {
+        content: imageBuffer,
+      },
+    });
+
+    const detections = result.textAnnotations;
+    if (!detections || detections.length === 0) {
+      console.log('No text detected');
+      return '';
+    }
+
+    // El primer elemento contiene todo el texto detectado
+    return detections[0].description || '';
+  } catch (error) {
+    console.error('Error en OCR:', error);
+    throw new Error(`Error en OCR: ${error.message}`);
+  }
+}
+
 async function extractText(file: File): Promise<string> {
   try {
     console.log('Iniciando extracción de texto del archivo:', file.name);
-    
-    // Convertir el archivo a ArrayBuffer
     const buffer = await file.arrayBuffer();
     
-    // Si es un PDF, usar una estrategia específica para PDFs
     if (file.type === 'application/pdf') {
-      // Por ahora, usaremos una extracción básica del contenido
-      const text = await new Response(buffer).text();
-      return text.replace(/[^\x20-\x7E\n]/g, ' ').trim();
+      const pdfDoc = await PDFDocument.load(buffer);
+      const pageCount = pdfDoc.getPageCount();
+      let fullText = '';
+      
+      for (let i = 0; i < pageCount; i++) {
+        console.log(`Procesando página ${i + 1} de ${pageCount}`);
+        const imageBuffer = await convertPDFPageToImage(buffer, i);
+        const pageText = await performOCR(imageBuffer);
+        fullText += pageText + '\n\n';
+      }
+      
+      return fullText.trim();
     }
     
-    // Para documentos de texto y otros formatos soportados
+    // Para imágenes, procesar directamente con Vision API
+    if (file.type.includes('image/')) {
+      const imageBuffer = new Uint8Array(buffer);
+      return await performOCR(imageBuffer);
+    }
+    
+    // Para documentos de texto
     if (file.type.includes('text/') || 
         file.type.includes('application/msword') ||
         file.type.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
-      const text = await new Response(buffer).text();
-      return text.trim();
-    }
-    
-    // Para imágenes, por ahora retornamos un mensaje indicando que no se puede procesar
-    if (file.type.includes('image/')) {
-      return 'Contenido de imagen - procesamiento de texto no disponible';
+      return await new Response(buffer).text();
     }
     
     throw new Error(`Tipo de archivo no soportado: ${file.type}`);
   } catch (error) {
     console.error('Error extrayendo texto:', error);
-    throw new Error(`Error procesando archivo: ${error.message}`);
+    throw error;
   }
 }
 
@@ -81,6 +129,7 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
 }
 
 serve(async (req) => {
+  // Manejar preflight CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
