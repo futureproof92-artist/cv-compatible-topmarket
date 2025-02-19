@@ -1,3 +1,4 @@
+
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -62,14 +63,19 @@ const Index = () => {
       const checkProcessing = async () => {
         try {
           console.log('Verificando procesamiento para documentId:', documentId);
-          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/documents?id=eq.${documentId}&select=processed_text,status`, {
-            headers: {
-              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-            }
-          });
           
-          const [data] = await response.json();
+          // Usar cliente Supabase en lugar de fetch
+          const { data, error } = await supabase
+            .from('documents')
+            .select('processed_text, status')
+            .eq('id', documentId)
+            .single();
+          
+          if (error) {
+            console.error('Error en consulta Supabase:', error);
+            return false;
+          }
+          
           console.log('Respuesta de procesamiento:', data);
           
           if (data?.status === 'processed' && data?.processed_text) {
@@ -92,7 +98,7 @@ const Index = () => {
         let currentProgress = 10;
         setUploadProgress(currentProgress);
         
-        const waitTimes = [1000, 2000, 3000, 5000, 8000]; // Tiempos de espera exponenciales
+        const waitTimes = [1000, 2000, 3000, 5000, 8000];
         
         while (attempts < maxAttempts) {
           const isProcessed = await checkProcessing();
@@ -101,11 +107,9 @@ const Index = () => {
             break;
           }
           
-          // Incremento determinístico del progreso
           currentProgress = Math.min(90, 10 + Math.floor((attempts + 1) * (80 / maxAttempts)));
           setUploadProgress(currentProgress);
           
-          // Tiempo de espera exponencial
           const waitTime = waitTimes[Math.min(attempts, waitTimes.length - 1)];
           await new Promise(resolve => setTimeout(resolve, waitTime));
           attempts++;
@@ -116,7 +120,7 @@ const Index = () => {
           setUploadProgress(0);
           toast({
             title: "Tiempo de procesamiento excedido",
-            description: "Por favor, inténtelo de nuevo más tarde. El servidor podría estar ocupado.",
+            description: "El servidor está tardando más de lo esperado. Por favor, verifique el estado del documento más tarde.",
             variant: "destructive"
           });
         }
