@@ -7,7 +7,7 @@ import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 // Configuración de CORS mejorada
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
   'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin',
   'Access-Control-Max-Age': '86400',
