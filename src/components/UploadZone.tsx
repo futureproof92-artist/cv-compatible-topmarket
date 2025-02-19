@@ -34,25 +34,16 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Llamar directamente a la URL de la función
-      const response = await fetch('https://bhergnyfmwmxjrijiwoc.supabase.co/functions/v1/process-document', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'apikey': supabase.supabaseKey, // Usando la clave anónima del cliente Supabase configurado
-        },
+      // Llamar directamente a la URL de la función usando la API de Supabase Functions
+      const { data, error } = await supabase.functions.invoke('process-document', {
         body: formData,
       });
 
-      if (!response.ok) {
-        // Manejar errores HTTP específicos
-        if (response.status === 0) {
-          throw new Error('Error de red: Posible problema CORS');
-        }
-        throw new Error(`Error HTTP: ${response.status}`);
+      if (error) {
+        console.error('Error en la función:', error);
+        throw error;
       }
 
-      const data = await response.json();
       console.log('Respuesta de process-document:', data);
 
       if (!data?.document?.id) {
