@@ -15,13 +15,24 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
 
   const processFile = async (file: File) => {
     console.log('Iniciando procesamiento del archivo:', file.name);
-    const formData = new FormData();
-    formData.append('file', file);
-
+    
     try {
+      // Convertir el archivo a Base64
+      const reader = new FileReader();
+      const base64Promise = new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = (error) => reject(error);
+      });
+      reader.readAsDataURL(file);
+      const base64Data = await base64Promise;
+
       console.log('Invocando función process-document...');
       const { data, error } = await supabase.functions.invoke('process-document', {
-        body: formData,
+        body: {
+          filename: file.name,
+          fileType: file.type,
+          fileData: base64Data
+        }
       });
 
       if (error) {
