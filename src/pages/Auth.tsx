@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 
 const Auth = () => {
+  const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -79,15 +80,21 @@ const Auth = () => {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Acceso al Sistema</CardTitle>
+          <CardTitle>{isLogin ? "Iniciar Sesión" : "Registro de Usuario"}</CardTitle>
           <CardDescription>
-            Inicia sesión o regístrate para continuar
+            {isLogin 
+              ? "Ingresa tus credenciales para continuar" 
+              : "Crea una nueva cuenta para comenzar"}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={(e) => {
             e.preventDefault();
-            handleLogin(e);
+            if (isLogin) {
+              handleLogin(e);
+            } else {
+              handleSignUp();
+            }
           }}>
             <div className="space-y-2">
               <Input
@@ -105,21 +112,17 @@ const Auth = () => {
                 required
               />
             </div>
-            <div className="flex space-x-2">
-              <Button type="submit" disabled={loading} className="flex-1">
-                {loading ? "Procesando..." : "Iniciar Sesión"}
+            <div className="space-y-4">
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Procesando..." : (isLogin ? "Iniciar Sesión" : "Registrarse")}
               </Button>
               <Button 
                 type="button" 
                 variant="outline" 
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleSignUp();
-                }}
-                disabled={loading}
-                className="flex-1"
+                onClick={() => setIsLogin(!isLogin)}
+                className="w-full"
               >
-                Registrarse
+                {isLogin ? "¿No tienes cuenta? Regístrate" : "¿Ya tienes cuenta? Inicia sesión"}
               </Button>
             </div>
           </form>
