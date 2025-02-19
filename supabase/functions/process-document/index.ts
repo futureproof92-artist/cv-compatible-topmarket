@@ -2,39 +2,58 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PDFDocument } from 'https://cdn.skypack.dev/pdf-lib';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-function sanitizeText(text: string): string {
-  // Reemplazar caracteres Unicode no estándar y secuencias de escape
-  return text
-    .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\uFFFD\uFFFE\uFFFF]/g, '') // Remover caracteres de control
-    .replace(/\\u[0-9a-fA-F]{4}/g, '') // Remover secuencias de escape Unicode
-    .replace(/[\uD800-\uDFFF]/g, ''); // Remover surrogate pairs inválidos
+async function extractTextFromPDF(pdfBytes: Uint8Array): Promise<string> {
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pages = pdfDoc.getPages();
+    let text = '';
+
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const content = await page.getTextContent();
+      text += content.items.map((item: any) => item.str).join(' ') + '\n';
+    }
+
+    return text.trim();
+  } catch (error) {
+    console.error('Error extrayendo texto del PDF:', error);
+    throw new Error('Error al procesar el PDF');
+  }
 }
 
 async function processDocumentText(supabaseAdmin: any, document: any, file: File) {
   try {
+    console.log('Iniciando procesamiento de documento:', document.filename);
     const buffer = await file.arrayBuffer();
     console.log('Buffer obtenido, tamaño:', buffer.byteLength);
     
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    const rawText = decoder.decode(buffer);
-    const text = sanitizeText(rawText);
+    let extractedText = '';
     
-    console.log('Texto decodificado y sanitizado, longitud:', text.length);
+    if (file.type === 'application/pdf') {
+      extractedText = await extractTextFromPDF(new Uint8Array(buffer));
+    } else {
+      // Para otros tipos de archivo, intentamos decodificación simple
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      extractedText = decoder.decode(buffer);
+    }
     
-    if (!text) {
-      throw new Error('No text content extracted from file');
+    console.log('Texto extraído, longitud:', extractedText.length);
+    
+    if (!extractedText) {
+      throw new Error('No se pudo extraer texto del documento');
     }
 
     const { error: updateError } = await supabaseAdmin
       .from('documents')
       .update({
-        processed_text: text,
+        processed_text: extractedText,
         status: 'processed',
         processed_at: new Date().toISOString(),
       })
@@ -58,7 +77,6 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -83,13 +101,11 @@ serve(async (req) => {
       size: file.size
     });
 
-    // Generar un file_path único y sanitizado
     const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
     const filePath = `${sanitizedName}_${crypto.randomUUID()}.${fileExt}`;
     console.log('File path generado:', filePath);
 
-    // Crear el registro del documento en la base de datos
     const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
     
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -98,7 +114,6 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Insertar documento
     console.log('Insertando documento en la base de datos...');
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
@@ -116,7 +131,6 @@ serve(async (req) => {
       throw new Error(`Database insert error: ${insertError.message}`);
     }
 
-    // Procesar el documento en segundo plano
     EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, file));
 
     return new Response(
@@ -136,12 +150,7 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error en process-document:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
-
+    console.error('Error en process-document:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message || 'An unexpected error occurred',
