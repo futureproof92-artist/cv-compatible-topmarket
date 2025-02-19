@@ -14,10 +14,10 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
   const { toast } = useToast();
 
   const processFile = async (file: File) => {
-    console.log('Iniciando procesamiento del archivo:', file.name);
+    console.log('Iniciando procesamiento del archivo:', file.name, 'tipo:', file.type, 'tamaño:', file.size);
     
     try {
-      // Obtener la sesión de manera asíncrona
+      // Verificar sesión
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError) {
@@ -30,17 +30,26 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
         throw new Error('No se encontró token de acceso');
       }
 
-      // Crear FormData con el archivo
+      console.log('Sesión válida, preparando FormData');
       const formData = new FormData();
       formData.append('file', file);
 
-      // Llamar directamente a la URL de la función usando la API de Supabase Functions
+      console.log('Invocando función process-document');
       const { data, error } = await supabase.functions.invoke('process-document', {
         body: formData,
+        headers: {
+          'Accept': 'application/json',
+        },
       });
 
       if (error) {
         console.error('Error en la función:', error);
+        console.error('Detalles del error:', {
+          mensaje: error.message,
+          nombre: error.name,
+          stack: error.stack,
+          causa: error.cause
+        });
         throw error;
       }
 
@@ -59,6 +68,8 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       return data;
     } catch (error) {
       console.error('Error procesando archivo:', error);
+      console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace disponible');
+      
       toast({
         title: "Error al procesar el archivo",
         description: error instanceof Error ? error.message : "Hubo un problema al procesar el archivo. Por favor, intenta nuevamente.",
@@ -69,7 +80,11 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    console.log('Archivos recibidos en onDrop:', acceptedFiles.map(f => f.name));
+    console.log('Archivos recibidos en onDrop:', acceptedFiles.map(f => ({
+      nombre: f.name,
+      tipo: f.type,
+      tamaño: f.size
+    })));
     
     for (const file of acceptedFiles) {
       try {
@@ -79,6 +94,7 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
         onFilesAccepted([file], processedData);
       } catch (error) {
         console.error(`Error procesando archivo ${file.name}:`, error);
+        console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace disponible');
       }
     }
   }, [onFilesAccepted]);
