@@ -17,6 +17,14 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     console.log('Iniciando procesamiento del archivo:', file.name);
     
     try {
+      // Obtener la sesión de manera asíncrona
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+
+      if (!accessToken) {
+        throw new Error('No se encontró token de acceso');
+      }
+
       // Crear FormData con el archivo
       const formData = new FormData();
       formData.append('file', file);
@@ -25,7 +33,7 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const response = await fetch('https://bhergnyfmwmxjrijiwoc.supabase.co/functions/v1/process-document', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${supabase.auth.getSession()?.access_token}`,
+          'Authorization': `Bearer ${accessToken}`,
           'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
         },
         body: formData,
