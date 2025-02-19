@@ -39,7 +39,7 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
-          'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
+          'apikey': supabase.supabaseKey, // Usando la clave anónima del cliente Supabase configurado
         },
         body: formData,
       });
