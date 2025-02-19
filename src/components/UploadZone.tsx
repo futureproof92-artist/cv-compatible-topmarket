@@ -18,10 +18,15 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     
     try {
       // Obtener la sesión de manera asíncrona
-      const { data: { session } } = await supabase.auth.getSession();
-      const accessToken = session?.access_token;
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.error('Error obteniendo sesión:', sessionError);
+        throw new Error('Error de autenticación');
+      }
 
-      if (!accessToken) {
+      if (!session?.access_token) {
+        console.error('No se encontró token de acceso');
         throw new Error('No se encontró token de acceso');
       }
 
@@ -33,13 +38,17 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const response = await fetch('https://bhergnyfmwmxjrijiwoc.supabase.co/functions/v1/process-document', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': `Bearer ${session.access_token}`,
           'apikey': process.env.VITE_SUPABASE_ANON_KEY || '',
         },
         body: formData,
       });
 
       if (!response.ok) {
+        // Manejar errores HTTP específicos
+        if (response.status === 0) {
+          throw new Error('Error de red: Posible problema CORS');
+        }
         throw new Error(`Error HTTP: ${response.status}`);
       }
 
@@ -61,7 +70,7 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       console.error('Error procesando archivo:', error);
       toast({
         title: "Error al procesar el archivo",
-        description: "Hubo un problema al procesar el archivo. Por favor, intenta nuevamente.",
+        description: error instanceof Error ? error.message : "Hubo un problema al procesar el archivo. Por favor, intenta nuevamente.",
         variant: "destructive"
       });
       throw error;
