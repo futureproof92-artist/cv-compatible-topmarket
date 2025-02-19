@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,30 +5,31 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const { toast } = useToast();
+  const {
+    toast
+  } = useToast();
   const navigate = useNavigate();
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const {
+        data,
+        error
+      } = await supabase.auth.signInWithPassword({
         email,
-        password,
+        password
       });
-
       if (error) throw error;
-
       if (data.session) {
         toast({
           title: "Inicio de sesión exitoso",
-          description: "Bienvenido de vuelta!",
+          description: "Bienvenido de vuelta!"
         });
         navigate("/");
       }
@@ -37,31 +37,30 @@ const Auth = () => {
       toast({
         title: "Error al iniciar sesión",
         description: error.message,
-        variant: "destructive",
+        variant: "destructive"
       });
     } finally {
       setLoading(false);
     }
   };
-
   const handleSignUp = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const {
+        data,
+        error
+      } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: window.location.origin,
-        },
+          emailRedirectTo: window.location.origin
+        }
       });
-
       if (error) throw error;
-
       toast({
         title: "Registro exitoso",
-        description: "Por favor verifica tu correo electrónico",
+        description: "Por favor verifica tu correo electrónico"
       });
-      
       if (data.session) {
         navigate("/");
       }
@@ -69,67 +68,44 @@ const Auth = () => {
       toast({
         title: "Error al registrarse",
         description: error.message,
-        variant: "destructive",
+        variant: "destructive"
       });
     } finally {
       setLoading(false);
     }
   };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+  return <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>{isLogin ? "Iniciar Sesión" : "Registro de Usuario"}</CardTitle>
-          <CardDescription>
-            {isLogin 
-              ? "Ingresa tus credenciales para continuar" 
-              : "Crea una nueva cuenta para comenzar"}
+        <CardHeader className="bg-slate-900 hover:bg-slate-800">
+          <CardTitle className="my-[21px] py-[31px] mx-0 text-5xl text-zinc-50">{isLogin ? "Iniciar Sesión" : "Registro de Usuario"}</CardTitle>
+          <CardDescription className="px-[60px] text-slate-100">
+            {isLogin ? "Ingresa tus credenciales para continuar" : "Crea una nueva cuenta para comenzar"}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4" onSubmit={(e) => {
-            e.preventDefault();
-            if (isLogin) {
-              handleLogin(e);
-            } else {
-              handleSignUp();
-            }
-          }}>
+          <form className="space-y-4" onSubmit={e => {
+          e.preventDefault();
+          if (isLogin) {
+            handleLogin(e);
+          } else {
+            handleSignUp();
+          }
+        }}>
             <div className="space-y-2">
-              <Input
-                type="email"
-                placeholder="correo@ejemplo.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-              <Input
-                type="password"
-                placeholder="Contraseña"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <Input type="email" placeholder="correo@ejemplo.com" value={email} onChange={e => setEmail(e.target.value)} required />
+              <Input type="password" placeholder="Contraseña" value={password} onChange={e => setPassword(e.target.value)} required />
             </div>
             <div className="space-y-4">
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Procesando..." : (isLogin ? "Iniciar Sesión" : "Registrarse")}
+                {loading ? "Procesando..." : isLogin ? "Iniciar Sesión" : "Registrarse"}
               </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => setIsLogin(!isLogin)}
-                className="w-full"
-              >
+              <Button type="button" variant="outline" onClick={() => setIsLogin(!isLogin)} className="w-full">
                 {isLogin ? "¿No tienes cuenta? Regístrate" : "¿Ya tienes cuenta? Inicia sesión"}
               </Button>
             </div>
           </form>
         </CardContent>
       </Card>
-    </div>
-  );
+    </div>;
 };
-
 export default Auth;
