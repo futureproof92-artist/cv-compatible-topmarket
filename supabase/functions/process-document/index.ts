@@ -5,13 +5,26 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*', // Temporalmente más permisivo para diagnóstico
-  'Access-Control-Allow-Methods': '*', // Permitir todos los métodos temporalmente
-  'Access-Control-Allow-Headers': '*', // Permitir todos los headers temporalmente
+const allowedOrigins = [
+  'https://cv-compatible-topmarket.lovable.app',
+  'https://preview--cv-compatible-topmarket.lovable.app',
+  'https://id-preview--43b38b73-5d14-4437-98b7-87cbf69cd99c.lovable.app' // Preview actual
+];
+
+// Función para verificar y obtener el origen permitido
+const getAllowedOrigin = (requestOrigin: string | null) => {
+  if (!requestOrigin) return allowedOrigins[0]; // Default al primer origen si no hay origin
+  return allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0];
+};
+
+const getCorsHeaders = (requestOrigin: string | null) => ({
+  'Access-Control-Allow-Origin': getAllowedOrigin(requestOrigin),
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Credentials': 'true',
   'Access-Control-Max-Age': '86400',
-};
+  'Vary': 'Origin'
+});
 
 const log = {
   info: (message: string, data?: any) => {
@@ -169,26 +182,18 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
 }
 
 serve(async (req) => {
-  // Logging mejorado para cada petición
-  log.info(`Nueva petición recibida - Método: ${req.method}`, {
-    headers: Object.fromEntries(req.headers.entries()),
-    url: req.url,
-    origin: req.headers.get('origin') || 'no origin'
-  });
+  const requestOrigin = req.headers.get('origin');
+  log.info('Request origin:', requestOrigin);
 
   // Manejo mejorado de OPTIONS para CORS
   if (req.method === 'OPTIONS') {
     log.info('Procesando petición OPTIONS (CORS preflight)', {
-      requestHeaders: Object.fromEntries(req.headers.entries())
+      requestHeaders: Object.fromEntries(req.headers.entries()),
+      origin: requestOrigin
     });
     return new Response(null, {
       status: 204,
-      headers: {
-        ...corsHeaders,
-        'Content-Length': '0',
-        'Content-Type': 'text/plain',
-        'Vary': 'Origin'
-      }
+      headers: getCorsHeaders(requestOrigin)
     });
   }
 
@@ -261,9 +266,8 @@ serve(async (req) => {
     return new Response(JSON.stringify(responseData), {
       status: 200,
       headers: {
-        ...corsHeaders,
-        'Content-Type': 'application/json',
-        'Vary': 'Origin'
+        ...getCorsHeaders(requestOrigin),
+        'Content-Type': 'application/json'
       }
     });
   } catch (error) {
@@ -276,9 +280,8 @@ serve(async (req) => {
       {
         status: 500,
         headers: {
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-          'Vary': 'Origin'
+          ...getCorsHeaders(requestOrigin),
+          'Content-Type': 'application/json'
         }
       }
     );
