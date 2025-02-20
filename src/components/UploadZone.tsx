@@ -17,7 +17,6 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     console.log('Iniciando procesamiento del archivo:', file.name, 'tipo:', file.type, 'tamaño:', file.size);
     
     try {
-      // Verificar sesión
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError) {
@@ -34,25 +33,23 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const formData = new FormData();
       formData.append('file', file);
 
-      console.log('Invocando función process-document');
-      const { data, error } = await supabase.functions.invoke('process-document', {
-        body: formData,
+      // Usar fetch directamente para tener más control sobre los headers
+      const response = await fetch(`${supabase.functions.url}/process-document`, {
+        method: 'POST',
         headers: {
+          'Authorization': `Bearer ${session.access_token}`,
           'Accept': 'application/json',
         },
+        body: formData,
+        credentials: 'include',
       });
 
-      if (error) {
-        console.error('Error en la función:', error);
-        console.error('Detalles del error:', {
-          mensaje: error.message,
-          nombre: error.name,
-          stack: error.stack,
-          causa: error.cause
-        });
-        throw error;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Error HTTP: ${response.status} - ${errorData.error || response.statusText}`);
       }
 
+      const data = await response.json();
       console.log('Respuesta de process-document:', data);
 
       if (!data?.document?.id) {
