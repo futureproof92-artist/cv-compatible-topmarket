@@ -37,18 +37,31 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const functionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-document`;
       console.log('URL de la función:', functionUrl);
 
+      // Realizar la petición con los headers corregidos
       const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
-          'Accept': 'application/json',
+          // No incluimos Content-Type aquí porque el navegador lo configurará automáticamente con el boundary correcto
+          'Accept': '*/*',
         },
         body: formData,
-        credentials: 'include',
+        // Modificamos las opciones de CORS
+        mode: 'cors',
+        credentials: 'same-origin', // Cambiamos a same-origin ya que estamos usando el token en los headers
+        referrerPolicy: 'strict-origin-when-cross-origin',
       });
+
+      console.log('Respuesta status:', response.status);
+      console.log('Respuesta headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('Error en la respuesta:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData
+        });
         throw new Error(`Error HTTP: ${response.status} - ${errorData.error || response.statusText}`);
       }
 
