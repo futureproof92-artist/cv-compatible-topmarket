@@ -33,8 +33,11 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Usar fetch directamente para tener más control sobre los headers
-      const response = await fetch(`${supabase.functions.url}/process-document`, {
+      // Construir la URL usando el SUPABASE_URL base
+      const functionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-document`;
+      console.log('URL de la función:', functionUrl);
+
+      const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
