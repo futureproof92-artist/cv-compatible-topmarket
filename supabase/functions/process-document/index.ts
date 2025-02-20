@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -5,7 +6,7 @@ import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2"
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app/',
+  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
   'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin',
   'Access-Control-Max-Age': '86400',
