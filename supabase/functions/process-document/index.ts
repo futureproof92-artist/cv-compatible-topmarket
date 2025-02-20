@@ -1,20 +1,17 @@
-
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
-// Configuración de CORS mejorada
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
+  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app/',
   'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin',
   'Access-Control-Max-Age': '86400',
   'Access-Control-Allow-Credentials': 'true',
 };
 
-// Función para logging consistente
 const log = {
   info: (message: string, data?: any) => {
     console.log(`[INFO] ${message}`, data ? JSON.stringify(data) : '');
@@ -157,7 +154,6 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
 serve(async (req) => {
   log.info(`Recibida petición ${req.method}`);
 
-  // Manejo específico del preflight request
   if (req.method === 'OPTIONS') {
     log.info('Procesando OPTIONS request (CORS preflight)');
     return new Response(null, {
@@ -171,7 +167,6 @@ serve(async (req) => {
   }
 
   try {
-    // Validación del método HTTP
     if (req.method !== 'POST') {
       throw new Error(`Método ${req.method} no soportado`);
     }
@@ -181,7 +176,6 @@ serve(async (req) => {
       throw new Error('Request body está vacío');
     }
 
-    // Procesamiento del FormData
     const formData = await req.formData();
     const file = formData.get('file');
     
@@ -195,12 +189,10 @@ serve(async (req) => {
       tamaño: file.size
     });
 
-    // Procesamiento del nombre del archivo
     const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
     const sanitizedName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
     const filePath = `${sanitizedName}_${crypto.randomUUID()}.${fileExt}`;
 
-    // Validación de variables de entorno
     const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error('Faltan variables de entorno requeridas');
@@ -209,7 +201,6 @@ serve(async (req) => {
     log.info('Inicializando cliente Supabase');
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Inserción en base de datos
     log.info('Insertando documento en base de datos');
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
