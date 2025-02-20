@@ -33,23 +33,18 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Construir la URL usando el SUPABASE_URL base
       const functionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-document`;
       console.log('URL de la función:', functionUrl);
 
-      // Realizar la petición con los headers corregidos
+      // Modificamos la configuración de la petición
       const response = await fetch(functionUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
-          // No incluimos Content-Type aquí porque el navegador lo configurará automáticamente con el boundary correcto
-          'Accept': '*/*',
         },
         body: formData,
-        // Modificamos las opciones de CORS
         mode: 'cors',
-        credentials: 'same-origin', // Cambiamos a same-origin ya que estamos usando el token en los headers
-        referrerPolicy: 'strict-origin-when-cross-origin',
+        credentials: 'omit', // Cambiamos a 'omit' para evitar el envío de cookies
       });
 
       console.log('Respuesta status:', response.status);
