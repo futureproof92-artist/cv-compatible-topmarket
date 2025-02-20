@@ -6,9 +6,9 @@ import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2"
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin, cache-control, x-requested-with',
+  'Access-Control-Allow-Origin': '*', // Temporalmente más permisivo para diagnóstico
+  'Access-Control-Allow-Methods': '*', // Permitir todos los métodos temporalmente
+  'Access-Control-Allow-Headers': '*', // Permitir todos los headers temporalmente
   'Access-Control-Allow-Credentials': 'true',
   'Access-Control-Max-Age': '86400',
 };
@@ -172,18 +172,22 @@ serve(async (req) => {
   // Logging mejorado para cada petición
   log.info(`Nueva petición recibida - Método: ${req.method}`, {
     headers: Object.fromEntries(req.headers.entries()),
-    url: req.url
+    url: req.url,
+    origin: req.headers.get('origin') || 'no origin'
   });
 
   // Manejo mejorado de OPTIONS para CORS
   if (req.method === 'OPTIONS') {
-    log.info('Procesando petición OPTIONS (CORS preflight)');
+    log.info('Procesando petición OPTIONS (CORS preflight)', {
+      requestHeaders: Object.fromEntries(req.headers.entries())
+    });
     return new Response(null, {
-      status: 204, // No Content
+      status: 204,
       headers: {
         ...corsHeaders,
         'Content-Length': '0',
-        'Content-Type': 'text/plain'
+        'Content-Type': 'text/plain',
+        'Vary': 'Origin'
       }
     });
   }
@@ -258,7 +262,8 @@ serve(async (req) => {
       status: 200,
       headers: {
         ...corsHeaders,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Vary': 'Origin'
       }
     });
   } catch (error) {
@@ -272,7 +277,8 @@ serve(async (req) => {
         status: 500,
         headers: {
           ...corsHeaders,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Vary': 'Origin'
         }
       }
     );
