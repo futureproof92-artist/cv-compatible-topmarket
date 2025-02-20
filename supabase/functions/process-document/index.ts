@@ -26,8 +26,30 @@ const log = {
   }
 };
 
+async function initializeVisionClient() {
+  try {
+    const credentialsString = Deno.env.get("GOOGLE_CLOUD_VISION_CREDENTIALS");
+    if (!credentialsString) {
+      throw new Error('No se encontraron las credenciales de Google Cloud Vision');
+    }
+
+    log.info('Intentando parsear credenciales de Google Cloud Vision');
+    const credentials = JSON.parse(credentialsString);
+    
+    if (!credentials.project_id || !credentials.private_key || !credentials.client_email) {
+      throw new Error('Credenciales incompletas. Se requiere project_id, private_key y client_email');
+    }
+
+    log.info('Inicializando cliente de Vision API', { project_id: credentials.project_id });
+    return new ImageAnnotatorClient({ credentials });
+  } catch (error) {
+    log.error('Error inicializando Vision Client', error);
+    throw error;
+  }
+}
+
 async function convertPDFPageToImage(pdfBuffer: ArrayBuffer, pageNum: number): Promise<Uint8Array> {
-  console.log(`Iniciando conversión de página ${pageNum} a imagen`);
+  log.info(`Iniciando conversión de página ${pageNum} a imagen`);
   const pdfDoc = await PDFDocument.load(pdfBuffer);
   const page = pdfDoc.getPages()[pageNum];
   
@@ -35,7 +57,7 @@ async function convertPDFPageToImage(pdfBuffer: ArrayBuffer, pageNum: number): P
   const [copiedPage] = await singlePagePdf.copyPages(pdfDoc, [pageNum]);
   singlePagePdf.addPage(copiedPage);
   
-  console.log('Convirtiendo PDF a PNG...');
+  log.info('Convirtiendo PDF a PNG...');
   const pngBytes = await singlePagePdf.saveAsBase64({ dataUri: true });
   const base64Data = pngBytes.split(',')[1];
   return Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
@@ -43,14 +65,8 @@ async function convertPDFPageToImage(pdfBuffer: ArrayBuffer, pageNum: number): P
 
 async function performOCR(imageBuffer: Uint8Array): Promise<string> {
   try {
-    console.log('Iniciando OCR con Google Vision API');
-    const credentials = JSON.parse(Deno.env.get("GOOGLE_CLOUD_VISION_CREDENTIALS") || "{}");
-    
-    if (!credentials.project_id) {
-      throw new Error('Credenciales de Google Cloud Vision no válidas');
-    }
-
-    const client = new ImageAnnotatorClient({ credentials });
+    log.info('Iniciando OCR con Google Vision API');
+    const client = await initializeVisionClient();
 
     const [result] = await client.textDetection({
       image: {
@@ -60,32 +76,32 @@ async function performOCR(imageBuffer: Uint8Array): Promise<string> {
 
     const detections = result.textAnnotations;
     if (!detections || detections.length === 0) {
-      console.log('No se detectó texto en la imagen');
+      log.info('No se detectó texto en la imagen');
       return '';
     }
 
-    console.log('Texto detectado exitosamente');
+    log.info('Texto detectado exitosamente');
     return detections[0].description || '';
   } catch (error) {
-    console.error('Error en OCR:', error);
+    log.error('Error en OCR:', error);
     throw new Error(`Error en OCR: ${error.message}`);
   }
 }
 
 async function extractText(file: File): Promise<string> {
   try {
-    console.log(`Iniciando extracción de texto del archivo: ${file.name} (${file.type})`);
+    log.info(`Iniciando extracción de texto del archivo: ${file.name} (${file.type})`);
     const buffer = await file.arrayBuffer();
     
     if (file.type === 'application/pdf') {
-      console.log('Procesando PDF...');
+      log.info('Procesando PDF...');
       const pdfDoc = await PDFDocument.load(buffer);
       const pageCount = pdfDoc.getPageCount();
-      console.log(`PDF tiene ${pageCount} páginas`);
+      log.info(`PDF tiene ${pageCount} páginas`);
       let fullText = '';
       
       for (let i = 0; i < pageCount; i++) {
-        console.log(`Procesando página ${i + 1} de ${pageCount}`);
+        log.info(`Procesando página ${i + 1} de ${pageCount}`);
         const imageBuffer = await convertPDFPageToImage(buffer, i);
         const pageText = await performOCR(imageBuffer);
         fullText += pageText + '\n\n';
@@ -95,7 +111,7 @@ async function extractText(file: File): Promise<string> {
     }
     
     if (file.type.includes('image/')) {
-      console.log('Procesando imagen directamente con OCR');
+      log.info('Procesando imagen directamente con OCR');
       const imageBuffer = new Uint8Array(buffer);
       return await performOCR(imageBuffer);
     }
@@ -103,24 +119,24 @@ async function extractText(file: File): Promise<string> {
     if (file.type.includes('text/') || 
         file.type.includes('application/msword') ||
         file.type.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
-      console.log('Procesando documento de texto');
+      log.info('Procesando documento de texto');
       return await new Response(buffer).text();
     }
     
     throw new Error(`Tipo de archivo no soportado: ${file.type}`);
   } catch (error) {
-    console.error('Error extrayendo texto:', error);
+    log.error('Error extrayendo texto:', error);
     throw error;
   }
 }
 
 async function processDocumentText(supabaseAdmin: any, document: any, file: File) {
   try {
-    console.log('Iniciando procesamiento de documento:', document.filename);
+    log.info('Iniciando procesamiento de documento:', document.filename);
     
     let extractedText = await extractText(file);
-    console.log(`Texto extraído (${extractedText.length} caracteres)`);
-    console.log('Muestra del texto:', extractedText.substring(0, 200));
+    log.info(`Texto extraído (${extractedText.length} caracteres)`);
+    log.info('Muestra del texto:', extractedText.substring(0, 200));
     
     if (!extractedText) {
       throw new Error('No se pudo extraer texto del documento');
@@ -139,9 +155,9 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
       throw updateError;
     }
 
-    console.log('Documento procesado exitosamente:', document.id);
+    log.info('Documento procesado exitosamente:', document.id);
   } catch (error) {
-    console.error('Error procesando documento:', error);
+    log.error('Error procesando documento:', error);
     await supabaseAdmin
       .from('documents')
       .update({
