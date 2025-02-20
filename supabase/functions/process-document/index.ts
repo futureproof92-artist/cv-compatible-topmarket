@@ -8,9 +8,9 @@ import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
   'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin',
-  'Access-Control-Max-Age': '86400',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, accept, origin, cache-control, x-requested-with',
   'Access-Control-Allow-Credentials': 'true',
+  'Access-Control-Max-Age': '86400',
 };
 
 const log = {
@@ -169,10 +169,15 @@ async function processDocumentText(supabaseAdmin: any, document: any, file: File
 }
 
 serve(async (req) => {
-  log.info(`Recibida petición ${req.method}`);
+  // Logging mejorado para cada petición
+  log.info(`Nueva petición recibida - Método: ${req.method}`, {
+    headers: Object.fromEntries(req.headers.entries()),
+    url: req.url
+  });
 
+  // Manejo mejorado de OPTIONS para CORS
   if (req.method === 'OPTIONS') {
-    log.info('Procesando OPTIONS request (CORS preflight)');
+    log.info('Procesando petición OPTIONS (CORS preflight)');
     return new Response(null, {
       status: 204, // No Content
       headers: {
@@ -238,33 +243,34 @@ serve(async (req) => {
     log.info('Iniciando procesamiento asíncrono', { documentId: document.id });
     EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, file));
 
-    return new Response(
-      JSON.stringify({ 
-        success: true, 
-        document: { 
-          id: document.id,
-          filename: document.filename,
-          status: 'processing'
-        } 
-      }),
-      { 
-        status: 200,
-        headers: { 
-          ...corsHeaders,
-          'Content-Type': 'application/json'
-        } 
+    const responseData = {
+      success: true,
+      document: {
+        id: document.id,
+        filename: document.filename,
+        status: 'processing'
       }
-    );
+    };
+
+    log.info('Enviando respuesta exitosa', responseData);
+    
+    return new Response(JSON.stringify(responseData), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
   } catch (error) {
     log.error('Error en process-document', error);
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         error: error.message || 'Error inesperado',
         details: error.stack || 'No hay stack trace disponible'
       }), 
-      { 
+      {
         status: 500,
-        headers: { 
+        headers: {
           ...corsHeaders,
           'Content-Type': 'application/json'
         }
