@@ -17,50 +17,19 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     console.log('Iniciando procesamiento del archivo:', file.name, 'tipo:', file.type, 'tamaño:', file.size);
     
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        console.error('Error obteniendo sesión:', sessionError);
-        throw new Error('Error de autenticación');
-      }
-
-      if (!session?.access_token) {
-        console.error('No se encontró token de acceso');
-        throw new Error('No se encontró token de acceso');
-      }
-
-      console.log('Sesión válida, preparando FormData');
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const functionUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/process-document`;
-      console.log('URL de la función:', functionUrl);
-
-      // Modificamos la configuración de la petición
-      const response = await fetch(functionUrl, {
-        method: 'POST',
+      // Usamos directamente el cliente de Supabase para invocar la función
+      const { data, error } = await supabase.functions.invoke('process-document', {
+        body: { file },
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: formData,
-        mode: 'cors',
-        credentials: 'omit', // Cambiamos a 'omit' para evitar el envío de cookies
+          'Content-Type': 'multipart/form-data',
+        }
       });
 
-      console.log('Respuesta status:', response.status);
-      console.log('Respuesta headers:', Object.fromEntries(response.headers.entries()));
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Error en la respuesta:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData
-        });
-        throw new Error(`Error HTTP: ${response.status} - ${errorData.error || response.statusText}`);
+      if (error) {
+        console.error('Error invocando la función:', error);
+        throw error;
       }
 
-      const data = await response.json();
       console.log('Respuesta de process-document:', data);
 
       if (!data?.document?.id) {
