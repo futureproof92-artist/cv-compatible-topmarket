@@ -1,288 +1,192 @@
 
-import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { ImageAnnotatorClient } from "https://esm.sh/@google-cloud/vision@4.0.2";
-import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
-const allowedOrigins = [
-  'https://cv-compatible-topmarket.lovable.app',
-  'https://preview--cv-compatible-topmarket.lovable.app',
-  'https://id-preview--43b38b73-5d14-4437-98b7-87cbf69cd99c.lovable.app' // Preview actual
-];
-
-// Función para verificar y obtener el origen permitido
-const getAllowedOrigin = (requestOrigin: string | null) => {
-  if (!requestOrigin) return allowedOrigins[0]; // Default al primer origen si no hay origin
-  return allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0];
-};
-
-const getCorsHeaders = (requestOrigin: string | null) => ({
-  'Access-Control-Allow-Origin': getAllowedOrigin(requestOrigin),
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Credentials': 'true',
-  'Access-Control-Max-Age': '86400',
-  'Vary': 'Origin'
-});
-
-const log = {
-  info: (message: string, data?: any) => {
-    console.log(`[INFO] ${message}`, data ? JSON.stringify(data) : '');
-  },
-  error: (message: string, error: any) => {
-    console.error(`[ERROR] ${message}`, {
-      message: error.message,
-      stack: error.stack,
-      cause: error.cause
-    });
-  }
 };
 
-async function initializeVisionClient() {
+async function initGoogleCredentials() {
   try {
     const credentialsString = Deno.env.get("GOOGLE_CLOUD_VISION_CREDENTIALS");
     if (!credentialsString) {
       throw new Error('No se encontraron las credenciales de Google Cloud Vision');
     }
 
-    log.info('Intentando parsear credenciales de Google Cloud Vision');
     const credentials = JSON.parse(credentialsString);
-    
-    if (!credentials.project_id || !credentials.private_key || !credentials.client_email) {
-      throw new Error('Credenciales incompletas. Se requiere project_id, private_key y client_email');
+    if (!credentials.private_key || !credentials.client_email) {
+      throw new Error('Credenciales incompletas');
     }
 
-    log.info('Inicializando cliente de Vision API', { project_id: credentials.project_id });
-    return new ImageAnnotatorClient({ credentials });
+    // Genera el token JWT para autenticación
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = {
+      iss: credentials.client_email,
+      sub: credentials.client_email,
+      aud: 'https://vision.googleapis.com/',
+      iat: now,
+      exp: now + 3600,
+    };
+
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const encodedHeader = btoa(JSON.stringify(header));
+    const encodedPayload = btoa(JSON.stringify(jwt));
+    
+    // Firma el token con la clave privada
+    const textEncoder = new TextEncoder();
+    const privateKey = credentials.private_key;
+    const key = await crypto.subtle.importKey(
+      'pkcs8',
+      textEncoder.encode(privateKey),
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    
+    const signature = await crypto.subtle.sign(
+      'RSASSA-PKCS1-v1_5',
+      key,
+      textEncoder.encode(`${encodedHeader}.${encodedPayload}`)
+    );
+
+    return `${encodedHeader}.${encodedPayload}.${btoa(String.fromCharCode(...new Uint8Array(signature)))}`;
   } catch (error) {
-    log.error('Error inicializando Vision Client', error);
+    console.error('Error generando credenciales:', error);
     throw error;
   }
 }
 
-async function convertPDFPageToImage(pdfBuffer: ArrayBuffer, pageNum: number): Promise<Uint8Array> {
-  log.info(`Iniciando conversión de página ${pageNum} a imagen`);
-  const pdfDoc = await PDFDocument.load(pdfBuffer);
-  const page = pdfDoc.getPages()[pageNum];
-  
-  const singlePagePdf = await PDFDocument.create();
-  const [copiedPage] = await singlePagePdf.copyPages(pdfDoc, [pageNum]);
-  singlePagePdf.addPage(copiedPage);
-  
-  log.info('Convirtiendo PDF a PNG...');
-  const pngBytes = await singlePagePdf.saveAsBase64({ dataUri: true });
-  const base64Data = pngBytes.split(',')[1];
-  return Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-}
-
-async function performOCR(imageBuffer: Uint8Array): Promise<string> {
+async function performOCR(imageBase64: string, authToken: string) {
   try {
-    log.info('Iniciando OCR con Google Vision API');
-    const client = await initializeVisionClient();
-
-    const [result] = await client.textDetection({
-      image: {
-        content: imageBuffer,
+    const response = await fetch('https://vision.googleapis.com/v1/images:annotate', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        requests: [{
+          image: {
+            content: imageBase64
+          },
+          features: [{
+            type: 'TEXT_DETECTION'
+          }]
+        }]
+      })
     });
 
-    const detections = result.textAnnotations;
-    if (!detections || detections.length === 0) {
-      log.info('No se detectó texto en la imagen');
-      return '';
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Error en la respuesta de Vision API:', errorText);
+      throw new Error(`Error en Vision API: ${response.status} ${response.statusText}`);
     }
 
-    log.info('Texto detectado exitosamente');
-    return detections[0].description || '';
+    const result = await response.json();
+    return result.responses[0]?.fullTextAnnotation?.text || '';
   } catch (error) {
-    log.error('Error en OCR:', error);
-    throw new Error(`Error en OCR: ${error.message}`);
-  }
-}
-
-async function extractText(file: File): Promise<string> {
-  try {
-    log.info(`Iniciando extracción de texto del archivo: ${file.name} (${file.type})`);
-    const buffer = await file.arrayBuffer();
-    
-    if (file.type === 'application/pdf') {
-      log.info('Procesando PDF...');
-      const pdfDoc = await PDFDocument.load(buffer);
-      const pageCount = pdfDoc.getPageCount();
-      log.info(`PDF tiene ${pageCount} páginas`);
-      let fullText = '';
-      
-      for (let i = 0; i < pageCount; i++) {
-        log.info(`Procesando página ${i + 1} de ${pageCount}`);
-        const imageBuffer = await convertPDFPageToImage(buffer, i);
-        const pageText = await performOCR(imageBuffer);
-        fullText += pageText + '\n\n';
-      }
-      
-      return fullText.trim();
-    }
-    
-    if (file.type.includes('image/')) {
-      log.info('Procesando imagen directamente con OCR');
-      const imageBuffer = new Uint8Array(buffer);
-      return await performOCR(imageBuffer);
-    }
-    
-    if (file.type.includes('text/') || 
-        file.type.includes('application/msword') ||
-        file.type.includes('application/vnd.openxmlformats-officedocument.wordprocessingml.document')) {
-      log.info('Procesando documento de texto');
-      return await new Response(buffer).text();
-    }
-    
-    throw new Error(`Tipo de archivo no soportado: ${file.type}`);
-  } catch (error) {
-    log.error('Error extrayendo texto:', error);
+    console.error('Error en OCR:', error);
     throw error;
-  }
-}
-
-async function processDocumentText(supabaseAdmin: any, document: any, file: File) {
-  try {
-    log.info('Iniciando procesamiento de documento:', document.filename);
-    
-    let extractedText = await extractText(file);
-    log.info(`Texto extraído (${extractedText.length} caracteres)`);
-    log.info('Muestra del texto:', extractedText.substring(0, 200));
-    
-    if (!extractedText) {
-      throw new Error('No se pudo extraer texto del documento');
-    }
-
-    const { error: updateError } = await supabaseAdmin
-      .from('documents')
-      .update({
-        processed_text: extractedText,
-        status: 'processed',
-        processed_at: new Date().toISOString(),
-      })
-      .eq('id', document.id);
-
-    if (updateError) {
-      throw updateError;
-    }
-
-    log.info('Documento procesado exitosamente:', document.id);
-  } catch (error) {
-    log.error('Error procesando documento:', error);
-    await supabaseAdmin
-      .from('documents')
-      .update({
-        status: 'error',
-        error: error.message,
-      })
-      .eq('id', document.id);
   }
 }
 
 serve(async (req) => {
-  const requestOrigin = req.headers.get('origin');
-  log.info('Request origin:', requestOrigin);
-
-  // Manejo mejorado de OPTIONS para CORS
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    log.info('Procesando petición OPTIONS (CORS preflight)', {
-      requestHeaders: Object.fromEntries(req.headers.entries()),
-      origin: requestOrigin
-    });
-    return new Response(null, {
-      status: 204,
-      headers: getCorsHeaders(requestOrigin)
-    });
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    if (req.method !== 'POST') {
-      throw new Error(`Método ${req.method} no soportado`);
+    const { filename, contentType, fileData } = await req.json();
+    console.log('Procesando archivo:', filename, 'tipo:', contentType);
+
+    if (!fileData) {
+      throw new Error('No se recibió contenido del archivo');
     }
 
-    log.info('Verificando contenido de la petición');
-    if (!req.body) {
-      throw new Error('Request body está vacío');
-    }
+    // Inicializar cliente Supabase
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    );
 
-    const formData = await req.formData();
-    const file = formData.get('file');
-    
-    if (!file || !(file instanceof File)) {
-      throw new Error('Archivo inválido o faltante en la petición');
-    }
-
-    log.info('Archivo recibido', {
-      nombre: file.name,
-      tipo: file.type,
-      tamaño: file.size
-    });
-
-    const fileExt = (file.name.split('.').pop() || '').replace(/[^a-zA-Z0-9]/g, '');
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
-    const filePath = `${sanitizedName}_${crypto.randomUUID()}.${fileExt}`;
-
-    const { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = Deno.env.toObject();
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      throw new Error('Faltan variables de entorno requeridas');
-    }
-
-    log.info('Inicializando cliente Supabase');
-    const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-    log.info('Insertando documento en base de datos');
+    // Crear registro inicial del documento
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
-        filename: sanitizedName,
-        file_path: filePath,
-        content_type: file.type,
+        filename: filename,
         status: 'processing',
+        content_type: contentType
       })
       .select()
       .single();
 
     if (insertError) {
-      log.error('Error en inserción de documento', insertError);
-      throw new Error(`Error en base de datos: ${insertError.message}`);
+      throw insertError;
     }
 
-    log.info('Iniciando procesamiento asíncrono', { documentId: document.id });
-    EdgeRuntime.waitUntil(processDocumentText(supabaseAdmin, document, file));
+    console.log('Documento creado:', document.id);
 
-    const responseData = {
-      success: true,
-      document: {
-        id: document.id,
-        filename: document.filename,
-        status: 'processing'
-      }
-    };
+    // Procesar el documento
+    try {
+      console.log('Obteniendo token de autenticación...');
+      const authToken = await initGoogleCredentials();
+      
+      console.log('Realizando OCR...');
+      const extractedText = await performOCR(fileData, authToken);
+      
+      console.log('Texto extraído exitosamente, actualizando documento...');
+      
+      const { error: updateError } = await supabaseAdmin
+        .from('documents')
+        .update({
+          processed_text: extractedText,
+          status: 'processed',
+          processed_at: new Date().toISOString(),
+        })
+        .eq('id', document.id);
 
-    log.info('Enviando respuesta exitosa', responseData);
-    
-    return new Response(JSON.stringify(responseData), {
-      status: 200,
-      headers: {
-        ...getCorsHeaders(requestOrigin),
-        'Content-Type': 'application/json'
+      if (updateError) {
+        throw updateError;
       }
-    });
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          document: {
+            id: document.id,
+            filename: document.filename,
+            status: 'processed'
+          }
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } catch (error) {
+      console.error('Error procesando documento:', error);
+      
+      // Actualizar estado de error en el documento
+      await supabaseAdmin
+        .from('documents')
+        .update({
+          status: 'error',
+          error: error.message
+        })
+        .eq('id', document.id);
+
+      throw error;
+    }
   } catch (error) {
-    log.error('Error en process-document', error);
+    console.error('Error en process-document:', error);
+    
     return new Response(
       JSON.stringify({
-        error: error.message || 'Error inesperado',
-        details: error.stack || 'No hay stack trace disponible'
-      }), 
-      {
+        error: 'Error procesando el documento',
+        details: error.message
+      }),
+      { 
         status: 500,
-        headers: {
-          ...getCorsHeaders(requestOrigin),
-          'Content-Type': 'application/json'
-        }
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
   }
