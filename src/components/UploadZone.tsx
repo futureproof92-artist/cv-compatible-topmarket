@@ -17,12 +17,14 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     console.log('Iniciando procesamiento del archivo:', file.name, 'tipo:', file.type, 'tamaño:', file.size);
     
     try {
-      // Usamos directamente el cliente de Supabase para invocar la función
+      // Crear FormData
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Usamos FormData como body en la invocación de la función
       const { data, error } = await supabase.functions.invoke('process-document', {
-        body: { file },
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        }
+        method: 'POST',
+        body: formData,
       });
 
       if (error) {
