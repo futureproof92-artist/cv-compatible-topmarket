@@ -80,38 +80,116 @@ async function getGoogleAccessToken() {
   }
 }
 
-async function performOCR(imageBase64: string, accessToken: string) {
+async function performOCR(imageBase64: string, authToken: string) {
   try {
-    console.log('Iniciando llamada a Vision API...');
+    if (!imageBase64) {
+      throw new Error('No se proporcionó imagen para OCR');
+    }
+
+    console.log('Enviando a Google Vision API con base64:', imageBase64.substring(0, 100) + '...');
+    
     const response = await fetch('https://vision.googleapis.com/v1/images:annotate', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         requests: [{
-          image: {
-            content: imageBase64
-          },
-          features: [{
-            type: 'TEXT_DETECTION'
-          }]
+          image: { content: imageBase64 },
+          features: [{ type: 'TEXT_DETECTION' }]
         }]
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Error en respuesta de Vision API:', errorText);
-      throw new Error(`Error en Vision API: ${response.status} ${response.statusText}`);
+      console.error('Error en la respuesta de Vision API:', errorText);
+      throw new Error(`Error en Vision API: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const result = await response.json();
-    console.log('Respuesta de Vision API recibida exitosamente');
-    return result.responses[0]?.fullTextAnnotation?.text || '';
+    console.log('Respuesta completa de Vision API:', JSON.stringify(result, null, 2));
+    
+    if (!result.responses || !result.responses[0]) {
+      throw new Error('Respuesta de Vision API no contiene resultados');
+    }
+
+    const extractedText = result.responses[0]?.fullTextAnnotation?.text || '';
+    
+    if (!extractedText) {
+      console.warn('No se detectó texto en la imagen');
+      throw new Error('No se detectó texto en la imagen');
+    }
+
+    console.log(`Texto extraído (${extractedText.length} caracteres):`, extractedText.substring(0, 200) + '...');
+    
+    // Limpieza básica del texto
+    const cleanedText = extractedText
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Eliminar caracteres de control
+      .replace(/\s+/g, ' ') // Normalizar espacios
+      .trim();
+
+    if (cleanedText.length < 50) { // Umbral mínimo arbitrario
+      console.warn('Texto extraído demasiado corto:', cleanedText);
+      throw new Error('Texto extraído demasiado corto o inválido');
+    }
+
+    return cleanedText;
   } catch (error) {
     console.error('Error en OCR:', error);
+    throw error;
+  }
+}
+
+async function updateDocumentWithText(supabaseAdmin: any, documentId: string, extractedText: string) {
+  console.log(`Actualizando documento ${documentId} con texto extraído (${extractedText.length} caracteres)`);
+  
+  try {
+    const { error: updateError } = await supabaseAdmin
+      .from('documents')
+      .update({
+        processed_text: extractedText,
+        status: 'processed',
+        processed_at: new Date().toISOString(),
+        text_length: extractedText.length,
+        processing_metadata: {
+          last_update: new Date().toISOString(),
+          text_quality: 'success',
+          processing_notes: `Texto extraído exitosamente con ${extractedText.length} caracteres`
+        }
+      })
+      .eq('id', documentId);
+
+    if (updateError) {
+      console.error('Error actualizando documento:', updateError);
+      throw updateError;
+    }
+
+    console.log('Documento actualizado exitosamente');
+    return true;
+  } catch (error) {
+    console.error('Error en actualización de documento:', error);
+    
+    // Intentar actualizar el estado a error
+    try {
+      await supabaseAdmin
+        .from('documents')
+        .update({
+          status: 'error',
+          error: error.message,
+          processed_at: new Date().toISOString(),
+          processing_metadata: {
+            last_update: new Date().toISOString(),
+            text_quality: 'error',
+            processing_notes: `Error en procesamiento: ${error.message}`
+          }
+        })
+        .eq('id', documentId);
+    } catch (secondaryError) {
+      console.error('Error actualizando estado de error:', secondaryError);
+    }
+    
     throw error;
   }
 }
@@ -207,19 +285,7 @@ serve(async (req) => {
       const extractedText = await performOCR(fileData, accessToken);
       
       console.log('Texto extraído exitosamente, actualizando documento...');
-      
-      const { error: updateError } = await supabaseAdmin
-        .from('documents')
-        .update({
-          processed_text: extractedText,
-          status: 'processed',
-          processed_at: new Date().toISOString(),
-        })
-        .eq('id', document.id);
-
-      if (updateError) {
-        throw updateError;
-      }
+      await updateDocumentWithText(supabaseAdmin, document.id, extractedText);
 
       return new Response(
         JSON.stringify({
