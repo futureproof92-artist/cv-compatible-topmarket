@@ -13,15 +13,30 @@ interface UploadZoneProps {
 const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
   const { toast } = useToast();
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          // Eliminar el prefijo "data:*/*;base64," del resultado
+          const base64String = reader.result.split(',')[1];
+          resolve(base64String);
+        } else {
+          reject(new Error('Error al convertir el archivo a base64'));
+        }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const processFile = async (file: File) => {
     console.log('Iniciando procesamiento del archivo:', file.name, 'tipo:', file.type, 'tamaño:', file.size);
     
     try {
       // Convertir el archivo a base64
-      const buffer = await file.arrayBuffer();
-      const base64File = btoa(
-        new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
+      const base64File = await fileToBase64(file);
+      console.log('Archivo convertido a base64, enviando a process-document...');
 
       // Enviamos el archivo en base64 junto con metadata
       const { data, error } = await supabase.functions.invoke('process-document', {
