@@ -124,22 +124,61 @@ async function performOCR(imageBase64: string, authToken: string) {
 
     console.log(`Texto extraído (${extractedText.length} caracteres):`, extractedText.substring(0, 200) + '...');
     
-    // Limpieza básica del texto
-    const cleanedText = extractedText
-      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Eliminar caracteres de control
-      .replace(/\s+/g, ' ') // Normalizar espacios
-      .trim();
-
-    if (cleanedText.length < 50) { // Umbral mínimo arbitrario
-      console.warn('Texto extraído demasiado corto:', cleanedText);
-      throw new Error('Texto extraído demasiado corto o inválido');
-    }
-
-    return cleanedText;
+    return extractedText;
   } catch (error) {
     console.error('Error en OCR:', error);
     throw error;
   }
+}
+
+async function processExtractedText(text: string | null | undefined): Promise<{
+  processedText: string;
+  status: 'processed' | 'error';
+  metadata: {
+    textLength: number;
+    quality: 'success' | 'warning' | 'error';
+    notes: string;
+  };
+}> {
+  if (!text) {
+    return {
+      processedText: 'No se pudo extraer texto del documento',
+      status: 'error',
+      metadata: {
+        textLength: 0,
+        quality: 'error',
+        notes: 'El texto extraído está vacío o es nulo'
+      }
+    };
+  }
+
+  // Limpieza básica del texto
+  const cleanedText = text
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Eliminar caracteres de control
+    .replace(/\s+/g, ' ') // Normalizar espacios múltiples
+    .trim();
+
+  if (cleanedText.length < 50) {
+    return {
+      processedText: cleanedText || 'Texto extraído demasiado corto',
+      status: 'error',
+      metadata: {
+        textLength: cleanedText.length,
+        quality: 'warning',
+        notes: 'El texto extraído es demasiado corto para ser válido'
+      }
+    };
+  }
+
+  return {
+    processedText: cleanedText,
+    status: 'processed',
+    metadata: {
+      textLength: cleanedText.length,
+      quality: 'success',
+      notes: `Texto extraído y procesado correctamente (${cleanedText.length} caracteres)`
+    }
+  };
 }
 
 async function updateDocumentWithText(supabaseAdmin: any, documentId: string, extractedText: string) {
@@ -284,8 +323,39 @@ serve(async (req) => {
       console.log('Realizando OCR...');
       const extractedText = await performOCR(fileData, accessToken);
       
-      console.log('Texto extraído exitosamente, actualizando documento...');
-      await updateDocumentWithText(supabaseAdmin, document.id, extractedText);
+      console.log('Procesando texto extraído:', extractedText ? `${extractedText.substring(0, 100)}...` : 'Sin texto');
+      const processedResult = await processExtractedText(extractedText);
+      
+      console.log('Actualizando documento con texto procesado:', {
+        status: processedResult.status,
+        metadata: processedResult.metadata
+      });
+
+      const { error: updateError } = await supabaseAdmin
+        .from('documents')
+        .update({
+          processed_text: processedResult.processedText,
+          status: processedResult.status,
+          processed_at: new Date().toISOString(),
+          processing_metadata: {
+            last_update: new Date().toISOString(),
+            text_quality: processedResult.metadata.quality,
+            text_length: processedResult.metadata.textLength,
+            processing_notes: processedResult.metadata.notes
+          }
+        })
+        .eq('id', document.id);
+
+      if (updateError) {
+        console.error('Error al actualizar processed_text:', updateError);
+        throw updateError;
+      }
+
+      console.log('processed_text actualizado exitosamente:', {
+        documentId: document.id,
+        status: processedResult.status,
+        textLength: processedResult.metadata.textLength
+      });
 
       return new Response(
         JSON.stringify({
