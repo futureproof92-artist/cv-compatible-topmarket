@@ -116,17 +116,27 @@ async function performOCR(imageBase64: string, accessToken: string) {
   }
 }
 
-function generateSecureFilePath(filename: string): string {
-  const uuid = crypto.randomUUID();
-  
+function generateSecureFilePath(filename: string, uuid: string): string {
   const extension = filename.split('.').pop() || '';
-  
   const sanitizedName = filename
     .split('.')[0]
     .replace(/[^a-zA-Z0-9]/g, '_')
     .toLowerCase();
   
-  return `uploads/${sanitizedName}-${uuid}.${extension}`;
+  return `documents/${sanitizedName}-${uuid}.${extension}`;
+}
+
+function base64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const buffer = new Uint8Array(raw.length);
+  
+  for (let i = 0; i < raw.length; i++) {
+    buffer[i] = raw.charCodeAt(i);
+  }
+  
+  return buffer;
 }
 
 serve(async (req) => {
@@ -147,14 +157,36 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    const filePath = generateSecureFilePath(filename);
-    console.log('Path generado para el archivo:', filePath);
+    const fileUuid = crypto.randomUUID();
+    const storagePath = generateSecureFilePath(filename, fileUuid);
+    
+    console.log('Preparando archivo para almacenamiento:', storagePath);
+
+    const fileBuffer = base64ToUint8Array(fileData);
+
+    const { data: storageData, error: storageError } = await supabaseAdmin.storage
+      .from('cv_uploads')
+      .upload(storagePath, fileBuffer, {
+        contentType: contentType,
+        upsert: false
+      });
+
+    if (storageError) {
+      console.error('Error subiendo archivo a Storage:', storageError);
+      throw storageError;
+    }
+
+    console.log('Archivo subido exitosamente:', storageData?.path);
+
+    const { data: { publicUrl } } = supabaseAdmin.storage
+      .from('cv_uploads')
+      .getPublicUrl(storagePath);
 
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
         filename: filename,
-        file_path: filePath,
+        file_path: storagePath,
         status: 'processing',
         content_type: contentType
       })
@@ -196,7 +228,8 @@ serve(async (req) => {
             id: document.id,
             filename: document.filename,
             status: 'processed',
-            file_path: filePath
+            file_path: storagePath,
+            public_url: publicUrl
           }
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -211,6 +244,10 @@ serve(async (req) => {
           error: error.message
         })
         .eq('id', document.id);
+
+      await supabaseAdmin.storage
+        .from('cv_uploads')
+        .remove([storagePath]);
 
       throw error;
     }
