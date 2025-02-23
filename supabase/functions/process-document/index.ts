@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -19,13 +18,11 @@ async function getGoogleAccessToken() {
       throw new Error('Credenciales incompletas');
     }
 
-    // Limpiar la private key (remover headers y footers PEM)
     const privateKey = credentials.private_key
       .replace('-----BEGIN PRIVATE KEY-----\n', '')
       .replace('\n-----END PRIVATE KEY-----\n', '')
       .replace(/\n/g, '');
 
-    // Crear el JWT para OAuth
     const now = Math.floor(Date.now() / 1000);
     const jwt = {
       iss: credentials.client_email,
@@ -35,15 +32,12 @@ async function getGoogleAccessToken() {
       iat: now
     };
 
-    // Codificar header y payload
     const header = { alg: 'RS256', typ: 'JWT' };
     const encodedHeader = btoa(JSON.stringify(header));
     const encodedPayload = btoa(JSON.stringify(jwt));
     
-    // Convertir la private key de base64 a ArrayBuffer
     const binaryKey = Uint8Array.from(atob(privateKey), c => c.charCodeAt(0));
     
-    // Importar la clave privada
     const key = await crypto.subtle.importKey(
       'pkcs8',
       binaryKey,
@@ -52,7 +46,6 @@ async function getGoogleAccessToken() {
       ['sign']
     );
     
-    // Firmar el JWT
     const signature = await crypto.subtle.sign(
       'RSASSA-PKCS1-v1_5',
       key,
@@ -61,7 +54,6 @@ async function getGoogleAccessToken() {
 
     const signedJwt = `${encodedHeader}.${encodedPayload}.${btoa(String.fromCharCode(...new Uint8Array(signature)))}`;
 
-    // Obtener el access token de Google OAuth
     console.log('Solicitando access token a Google OAuth...');
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
@@ -124,8 +116,20 @@ async function performOCR(imageBase64: string, accessToken: string) {
   }
 }
 
+function generateSecureFilePath(filename: string): string {
+  const uuid = crypto.randomUUID();
+  
+  const extension = filename.split('.').pop() || '';
+  
+  const sanitizedName = filename
+    .split('.')[0]
+    .replace(/[^a-zA-Z0-9]/g, '_')
+    .toLowerCase();
+  
+  return `uploads/${sanitizedName}-${uuid}.${extension}`;
+}
+
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -138,17 +142,19 @@ serve(async (req) => {
       throw new Error('No se recibió contenido del archivo');
     }
 
-    // Inicializar cliente Supabase
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Crear registro inicial del documento
+    const filePath = generateSecureFilePath(filename);
+    console.log('Path generado para el archivo:', filePath);
+
     const { data: document, error: insertError } = await supabaseAdmin
       .from('documents')
       .insert({
         filename: filename,
+        file_path: filePath,
         status: 'processing',
         content_type: contentType
       })
@@ -161,7 +167,6 @@ serve(async (req) => {
 
     console.log('Documento creado:', document.id);
 
-    // Procesar el documento
     try {
       console.log('Obteniendo access token...');
       const accessToken = await getGoogleAccessToken();
@@ -190,7 +195,8 @@ serve(async (req) => {
           document: {
             id: document.id,
             filename: document.filename,
-            status: 'processed'
+            status: 'processed',
+            file_path: filePath
           }
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -198,7 +204,6 @@ serve(async (req) => {
     } catch (error) {
       console.error('Error procesando documento:', error);
       
-      // Actualizar estado de error en el documento
       await supabaseAdmin
         .from('documents')
         .update({
