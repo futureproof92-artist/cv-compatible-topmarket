@@ -1,15 +1,28 @@
 
 import { createClient } from 'https://esm.sh/@google-cloud/vision@4.0.2';
-import { serve } from "https://deno.fresh.dev/std@v1/http/server.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
 
 serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
   try {
     const { image, filename } = await req.json();
     
     if (!image || !filename) {
       return new Response(
         JSON.stringify({ error: 'Se requiere imagen y nombre de archivo' }),
-        { status: 400 }
+        { 
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
       );
     }
 
@@ -18,7 +31,10 @@ serve(async (req) => {
     if (!credentials) {
       return new Response(
         JSON.stringify({ error: 'Credenciales de Google Cloud Vision no configuradas' }),
-        { status: 500 }
+        { 
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
       );
     }
 
@@ -49,20 +65,27 @@ serve(async (req) => {
           text: detections[0].description,
           locale: detections[0].locale
         }),
-        { headers: { 'Content-Type': 'application/json' } }
+        { 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
       );
     }
 
     return new Response(
       JSON.stringify({ text: null }),
-      { headers: { 'Content-Type': 'application/json' } }
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
     );
 
   } catch (error) {
     console.error('Error:', error);
     return new Response(
       JSON.stringify({ error: 'Error procesando imagen' }),
-      { status: 500 }
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
     );
   }
 });
