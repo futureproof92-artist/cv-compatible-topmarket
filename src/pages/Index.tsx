@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -41,99 +40,108 @@ const Index = () => {
       return;
     }
 
-    setFiles(prev => [...prev, ...newFiles]);
-    setUploadProgress(0);
-    console.log('Archivos aceptados:', newFiles.map(f => f.name));
-    
-    if (processedData?.document?.id) {
-      const documentId = processedData.document.id;
-      console.log('Document ID recibido:', documentId);
-      
-      setDocumentIds(prev => {
-        const updated = {
-          ...prev,
-          [newFiles[0].name]: documentId
-        };
-        console.log('Nuevo estado de documentIds:', updated);
-        return updated;
-      });
-      
-      setLoadingTexts(prev => ({...prev, [documentId]: true}));
-      
-      const checkProcessing = async () => {
+    newFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64String = (reader.result as string).split(',')[1]; // Remover el prefijo "data:application/pdf;base64,"
+        
         try {
-          console.log('Verificando procesamiento para documentId:', documentId);
-          
-          // Usar cliente Supabase en lugar de fetch
-          const { data, error } = await supabase
-            .from('documents')
-            .select('processed_text, status')
-            .eq('id', documentId)
-            .single();
-          
-          if (error) {
-            console.error('Error en consulta Supabase:', error);
-            return false;
-          }
-          
-          console.log('Respuesta de procesamiento:', data);
-          
-          if (data?.status === 'processed' && data?.processed_text) {
-            setProcessedTexts(prev => ({...prev, [documentId]: data.processed_text}));
-            setLoadingTexts(prev => ({...prev, [documentId]: false}));
-            setUploadProgress(100);
-            return true;
-          }
-          
-          return false;
-        } catch (error) {
-          console.error('Error checking processing status:', error);
-          return false;
-        }
-      };
+          console.log('Enviando archivo a procesar:', file.name);
+          const { data, error } = await supabase.functions.invoke('process-document', {
+            body: {
+              filename: file.name,
+              contentType: file.type,
+              fileData: base64String
+            }
+          });
 
-      const poll = async () => {
-        let attempts = 0;
-        const maxAttempts = 30;
-        let currentProgress = 10;
-        setUploadProgress(currentProgress);
-        
-        const waitTimes = [1000, 2000, 3000, 5000, 8000];
-        
-        while (attempts < maxAttempts) {
-          const isProcessed = await checkProcessing();
-          if (isProcessed) {
-            setUploadProgress(100);
-            break;
+          if (error) throw error;
+
+          console.log('Respuesta del procesamiento:', data);
+          
+          if (data?.document?.id) {
+            const documentId = data.document.id;
+            setDocumentIds(prev => ({
+              ...prev,
+              [file.name]: documentId
+            }));
+            
+            setLoadingTexts(prev => ({...prev, [documentId]: true}));
+            setUploadProgress(10);
+            
+            let attempts = 0;
+            const maxAttempts = 30;
+            const poll = async () => {
+              while (attempts < maxAttempts) {
+                try {
+                  const { data: docData, error: docError } = await supabase
+                    .from('documents')
+                    .select('processed_text, status')
+                    .eq('id', documentId)
+                    .single();
+                  
+                  if (docError) throw docError;
+                  
+                  if (docData?.status === 'processed' && docData?.processed_text) {
+                    setProcessedTexts(prev => ({...prev, [documentId]: docData.processed_text}));
+                    setLoadingTexts(prev => ({...prev, [documentId]: false}));
+                    setUploadProgress(100);
+                    break;
+                  }
+                  
+                  const progress = Math.min(90, 10 + Math.floor((attempts + 1) * (80 / maxAttempts)));
+                  setUploadProgress(progress);
+                  
+                  attempts++;
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (error) {
+                  console.error('Error verificando estado:', error);
+                  break;
+                }
+              }
+              
+              if (attempts >= maxAttempts) {
+                setLoadingTexts(prev => ({...prev, [documentId]: false}));
+                setUploadProgress(0);
+                toast({
+                  title: "Error en el procesamiento",
+                  description: "No se pudo completar el procesamiento del documento.",
+                  variant: "destructive"
+                });
+              }
+            };
+            
+            poll();
           }
-          
-          currentProgress = Math.min(90, 10 + Math.floor((attempts + 1) * (80 / maxAttempts)));
-          setUploadProgress(currentProgress);
-          
-          const waitTime = waitTimes[Math.min(attempts, waitTimes.length - 1)];
-          await new Promise(resolve => setTimeout(resolve, waitTime));
-          attempts++;
-        }
-        
-        if (attempts >= maxAttempts) {
-          setLoadingTexts(prev => ({...prev, [documentId]: false}));
-          setUploadProgress(0);
+        } catch (error) {
+          console.error('Error procesando archivo:', error);
           toast({
-            title: "Tiempo de procesamiento excedido",
-            description: "El servidor está tardando más de lo esperado. Por favor, verifique el estado del documento más tarde.",
+            title: "Error",
+            description: "Hubo un problema al procesar el archivo.",
             variant: "destructive"
           });
         }
       };
 
-      poll();
-    }
+      reader.onerror = () => {
+        console.error('Error leyendo archivo:', file.name);
+        toast({
+          title: "Error",
+          description: "No se pudo leer el archivo.",
+          variant: "destructive"
+        });
+      };
 
+      reader.readAsDataURL(file);
+    });
+
+    setFiles(prev => [...prev, ...newFiles]);
+    
     toast({
       title: "Archivos subidos exitosamente",
       description: `Se han agregado ${newFiles.length} archivo(s).`
     });
-  }, [files, toast]);
+  }, [files, toast, setDocumentIds, setLoadingTexts, setProcessedTexts, setUploadProgress]);
 
   const removeFile = (index: number) => {
     const fileToRemove = files[index];
