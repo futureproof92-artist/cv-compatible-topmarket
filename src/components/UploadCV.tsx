@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Upload, FileType } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { processPDF, validatePDF } from "@/utils/PDFProcessor";
 
 export default function UploadCV() {
   const [file, setFile] = useState<File | null>(null);
@@ -28,12 +29,26 @@ export default function UploadCV() {
 
   const processFile = async (file: File): Promise<string> => {
     try {
-      // Convert file to base64
+      // Si es PDF, primero intentamos extraer texto con pdf.js
+      if (file.type === 'application/pdf') {
+        const isValidPDF = await validatePDF(file);
+        if (!isValidPDF) {
+          throw new Error('El archivo PDF no es válido o está dañado');
+        }
+
+        const pdfText = await processPDF(file);
+        if (pdfText) {
+          console.log('Texto extraído del PDF:', pdfText.substring(0, 100) + '...');
+          return pdfText;
+        }
+        console.log('PDF no contiene texto seleccionable, procesando como imagen...');
+      }
+
+      // Convert file to base64 for OCR processing
       const reader = new FileReader();
       const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => {
           if (typeof reader.result === 'string') {
-            // Remove data URL prefix (e.g., "data:application/pdf;base64,")
             const base64Data = reader.result.split(',')[1];
             resolve(base64Data);
           } else {
@@ -46,7 +61,7 @@ export default function UploadCV() {
       reader.readAsDataURL(file);
       const base64Data = await base64Promise;
 
-      // Call the process-document function
+      // Call the process-document function for OCR
       const { data, error } = await supabase.functions.invoke('process-document', {
         body: {
           filename: file.name,
@@ -57,7 +72,7 @@ export default function UploadCV() {
 
       if (error) throw error;
 
-      console.log('Respuesta del procesamiento:', data);
+      console.log('Respuesta del procesamiento OCR:', data);
       return data.document.id;
 
     } catch (error) {
@@ -84,7 +99,7 @@ export default function UploadCV() {
         throw new Error('Formato no soportado. Use PDF, PNG o JPG.');
       }
 
-      const documentId = await processFile(file);
+      const result = await processFile(file);
       
       toast({
         title: "Archivo procesado exitosamente",
