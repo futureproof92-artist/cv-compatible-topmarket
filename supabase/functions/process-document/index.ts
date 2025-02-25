@@ -112,19 +112,30 @@ async function performOCR(imageBase64: string, authToken: string) {
     console.log('Respuesta completa de Vision API:', JSON.stringify(result, null, 2));
     
     if (!result.responses || !result.responses[0]) {
-      throw new Error('Respuesta de Vision API no contiene resultados');
+      console.warn('No se encontraron respuestas en el resultado de Vision API');
+      return '';
     }
 
     const extractedText = result.responses[0]?.fullTextAnnotation?.text || '';
+    console.log('Texto extraído de OCR:', extractedText ? extractedText.substring(0, 100) + '...' : 'Sin texto');
     
+    // Validación y limpieza básica del texto
     if (!extractedText) {
       console.warn('No se detectó texto en la imagen');
-      throw new Error('No se detectó texto en la imagen');
+      return '';
     }
 
-    console.log(`Texto extraído (${extractedText.length} caracteres):`, extractedText.substring(0, 200) + '...');
-    
-    return extractedText;
+    const cleanedText = extractedText
+      .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Eliminar caracteres de control
+      .replace(/\s+/g, ' ') // Normalizar espacios múltiples
+      .trim();
+
+    if (cleanedText.length < 10) { // Umbral mínimo arbitrario
+      console.warn('Texto extraído demasiado corto:', cleanedText);
+      return '';
+    }
+
+    return cleanedText;
   } catch (error) {
     console.error('Error en OCR:', error);
     throw error;
@@ -323,26 +334,15 @@ serve(async (req) => {
       console.log('Realizando OCR...');
       const extractedText = await performOCR(fileData, accessToken);
       
-      console.log('Procesando texto extraído:', extractedText ? `${extractedText.substring(0, 100)}...` : 'Sin texto');
-      const processedResult = await processExtractedText(extractedText);
-      
-      console.log('Actualizando documento con texto procesado:', {
-        status: processedResult.status,
-        metadata: processedResult.metadata
-      });
+      console.log('Actualizando documento con texto extraído:', extractedText ? 'Texto válido' : 'Sin texto válido');
 
       const { error: updateError } = await supabaseAdmin
         .from('documents')
         .update({
-          processed_text: processedResult.processedText,
-          status: processedResult.status,
+          processed_text: extractedText || 'No se pudo extraer texto del documento',
+          status: extractedText ? 'processed' : 'error',
           processed_at: new Date().toISOString(),
-          processing_metadata: {
-            last_update: new Date().toISOString(),
-            text_quality: processedResult.metadata.quality,
-            text_length: processedResult.metadata.textLength,
-            processing_notes: processedResult.metadata.notes
-          }
+          error: extractedText ? null : 'No se pudo extraer texto válido del documento'
         })
         .eq('id', document.id);
 
@@ -351,11 +351,7 @@ serve(async (req) => {
         throw updateError;
       }
 
-      console.log('processed_text actualizado exitosamente:', {
-        documentId: document.id,
-        status: processedResult.status,
-        textLength: processedResult.metadata.textLength
-      });
+      console.log('processed_text actualizado exitosamente para documentId:', document.id);
 
       return new Response(
         JSON.stringify({
