@@ -11,26 +11,48 @@ const corsHeaders = {
 
 async function extractTextWithPdfJs(fileData: string): Promise<string> {
   try {
+    console.log('Iniciando extracción de texto con pdf.js');
+    
+    // Convertir base64 a Uint8Array para pdf.js
     const uint8Array = new Uint8Array(atob(fileData).split('').map(char => char.charCodeAt(0)));
+    console.log('Archivo convertido a Uint8Array, longitud:', uint8Array.length);
+
+    // Configurar worker para pdf.js
+    const workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.worker.min.mjs';
+    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+
+    // Cargar el PDF
+    console.log('Cargando PDF...');
     const loadingTask = pdfjs.getDocument({ data: uint8Array });
     const pdf = await loadingTask.promise;
-    let text = '';
+    console.log('PDF cargado, páginas:', pdf.numPages);
 
+    let text = '';
+    // Extraer texto de cada página
     for (let i = 1; i <= pdf.numPages; i++) {
+      console.log(`Procesando página ${i}/${pdf.numPages}`);
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      text += content.items.map((item: any) => item.str).join(' ');
+      const pageText = content.items.map((item: any) => item.str).join(' ');
+      text += pageText + ' ';
+      console.log(`Página ${i}: extraídos ${pageText.length} caracteres`);
     }
 
-    return text.trim();
+    const finalText = text.trim();
+    console.log('Texto total extraído:', finalText.length, 'caracteres');
+    return finalText;
   } catch (error) {
-    console.error('Error extrayendo texto con pdf.js:', error);
+    console.error('Error detallado en pdf.js:', error);
+    if (error instanceof Error) {
+      console.error('Stack trace:', error.stack);
+    }
     return '';
   }
 }
 
-async function performOCR(fileData: string, contentType: string): Promise<string> {
+async function performOCR(fileData: string): Promise<string> {
   try {
+    console.log('Iniciando OCR con Google Vision API');
     const credentials = Deno.env.get('GOOGLE_CLOUD_VISION_CREDENTIALS');
     if (!credentials) {
       throw new Error('Credenciales de Google Cloud Vision no configuradas');
@@ -40,78 +62,37 @@ async function performOCR(fileData: string, contentType: string): Promise<string
       credentials: JSON.parse(credentials)
     });
 
+    console.log('Cliente Vision API inicializado');
+
     const request = {
       image: {
         content: fileData
       },
       features: [
         {
-          type: 'TEXT_DETECTION'
+          type: 'DOCUMENT_TEXT_DETECTION' // Cambiado a DOCUMENT_TEXT_DETECTION para mejor precisión con documentos
         }
       ]
     };
 
+    console.log('Enviando solicitud a Vision API...');
     const [result] = await visionClient.textDetection(request);
-    const detections = result.textAnnotations;
+    console.log('Respuesta recibida de Vision API');
 
-    if (detections && detections.length > 0) {
-      return detections[0].description || '';
+    if (result.fullTextAnnotation) {
+      const extractedText = result.fullTextAnnotation.text;
+      console.log('Texto extraído con OCR:', extractedText.length, 'caracteres');
+      return extractedText;
     }
 
+    console.log('No se encontró texto en la imagen');
     return '';
   } catch (error) {
-    console.error('Error en OCR:', error);
+    console.error('Error detallado en OCR:', error);
+    if (error instanceof Error) {
+      console.error('Stack trace:', error.stack);
+    }
     return '';
-  }
-}
-
-async function processDocument(supabaseClient: any, fileData: string, filename: string, contentType: string, documentId: string) {
-  try {
-    console.log(`Procesando documento ${filename} (${contentType})`);
-
-    let extractedText = '';
-
-    if (contentType === 'application/pdf') {
-      console.log('Intentando extraer texto con pdf.js...');
-      extractedText = await extractTextWithPdfJs(fileData);
-    }
-
-    if (!extractedText) {
-      console.log('No se extrajo texto con pdf.js o no es PDF, intentando OCR...');
-      extractedText = await performOCR(fileData, contentType);
-    }
-
-    const finalText = extractedText.trim() || 'No se pudo extraer texto';
-    console.log(`Texto extraído (${finalText.length} caracteres)`);
-
-    const { error: updateError } = await supabaseClient
-      .from('documents')
-      .update({
-        processed_text: finalText,
-        status: 'processed',
-        processed_at: new Date().toISOString()
-      })
-      .eq('id', documentId);
-
-    if (updateError) {
-      throw updateError;
-    }
-
-    return finalText;
-  } catch (error) {
-    console.error('Error procesando documento:', error);
-    
-    await supabaseClient
-      .from('documents')
-      .update({
-        processed_text: 'Error al procesar el documento',
-        status: 'error',
-        processed_at: new Date().toISOString(),
-        error: error.message
-      })
-      .eq('id', documentId);
-
-    throw error;
   }
 }
 
@@ -121,18 +102,22 @@ serve(async (req) => {
   }
 
   try {
+    console.log('Iniciando procesamiento de documento');
     const { filename, contentType, fileData } = await req.json();
     
     if (!fileData || !filename || !contentType) {
       throw new Error('Se requieren filename, contentType y fileData');
     }
 
+    console.log('Tipo de archivo:', contentType);
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // Crear registro inicial en la tabla documents
+    // Crear registro inicial
+    console.log('Creando registro en la base de datos...');
     const { data: document, error: insertError } = await supabaseClient
       .from('documents')
       .insert({
@@ -144,26 +129,64 @@ serve(async (req) => {
       .select()
       .single();
 
-    if (insertError) throw insertError;
+    if (insertError) {
+      console.error('Error al crear registro:', insertError);
+      throw insertError;
+    }
+
+    // Procesar documento
+    let extractedText = '';
+    
+    if (contentType === 'application/pdf') {
+      console.log('Procesando PDF...');
+      extractedText = await extractTextWithPdfJs(fileData);
+      
+      if (!extractedText) {
+        console.log('No se extrajo texto con pdf.js, intentando OCR...');
+        extractedText = await performOCR(fileData);
+      }
+    } else {
+      console.log('Procesando imagen directamente con OCR...');
+      extractedText = await performOCR(fileData);
+    }
+
+    // Actualizar registro con el texto extraído
+    console.log('Actualizando registro con texto extraído...');
+    const finalText = extractedText.trim() || 'No se pudo extraer texto';
+    const { error: updateError } = await supabaseClient
+      .from('documents')
+      .update({
+        processed_text: finalText,
+        status: 'processed',
+        processed_at: new Date().toISOString()
+      })
+      .eq('id', document.id);
+
+    if (updateError) {
+      console.error('Error al actualizar registro:', updateError);
+      throw updateError;
+    }
 
     // Subir archivo a Storage
-    const { data: storageData, error: storageError } = await supabaseClient.storage
+    console.log('Subiendo archivo a Storage...');
+    const { error: storageError } = await supabaseClient.storage
       .from('cv_uploads')
       .upload(document.file_path, Uint8Array.from(atob(fileData), c => c.charCodeAt(0)), {
         contentType,
         upsert: false
       });
 
-    if (storageError) throw storageError;
+    if (storageError) {
+      console.error('Error al subir archivo:', storageError);
+      throw storageError;
+    }
 
     // Obtener URL pública
     const { data: { publicUrl } } = supabaseClient.storage
       .from('cv_uploads')
       .getPublicUrl(document.file_path);
 
-    // Procesar el documento
-    await processDocument(supabaseClient, fileData, filename, contentType, document.id);
-
+    console.log('Procesamiento completado exitosamente');
     return new Response(
       JSON.stringify({
         success: true,
@@ -172,18 +195,28 @@ serve(async (req) => {
           filename: document.filename,
           status: 'processed',
           file_path: document.file_path,
-          public_url: publicUrl
+          public_url: publicUrl,
+          extracted_text: finalText
         }
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json' 
+        } 
+      }
     );
 
   } catch (error) {
     console.error('Error en process-document:', error);
+    if (error instanceof Error) {
+      console.error('Stack trace:', error.stack);
+    }
+    
     return new Response(
       JSON.stringify({ 
         error: 'Error procesando documento', 
-        details: error.message
+        details: error instanceof Error ? error.message : 'Error desconocido'
       }),
       { 
         status: 500,
