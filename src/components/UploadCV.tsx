@@ -1,171 +1,154 @@
 
-import { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useDropzone } from 'react-dropzone';
+import { FileText, Upload, FileSearch, Loader2 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Loader2, Upload, FileType } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { processPDF, validatePDF } from "@/utils/PDFProcessor";
+import { processPDF, validatePDF } from '@/utils/PDFProcessor';
+import { processImage, validateImage, validateImageSize } from '@/utils/ImageProcessor';
 
-export default function UploadCV() {
-  const [file, setFile] = useState<File | null>(null);
+interface ProcessingResult {
+  text: string;
+  source: 'pdf' | 'image';
+}
+
+const UploadCV = () => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [result, setResult] = useState<ProcessingResult | null>(null);
   const { toast } = useToast();
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files[0]) {
-      const selectedFile = event.target.files[0];
-      if (selectedFile.size > 10 * 1024 * 1024) { // 10MB limit
-        toast({
-          title: "Archivo demasiado grande",
-          description: "El archivo no debe superar los 10MB",
-          variant: "destructive"
-        });
-        return;
-      }
-      setFile(selectedFile);
-    }
-  };
-
-  const processFile = async (file: File): Promise<string> => {
+  const processFile = async (file: File) => {
+    setIsProcessing(true);
     try {
-      // Si es PDF, primero intentamos extraer texto con pdf.js
-      if (file.type === 'application/pdf') {
-        const isValidPDF = await validatePDF(file);
-        if (!isValidPDF) {
-          throw new Error('El archivo PDF no es válido o está dañado');
-        }
+      let extractedText = '';
+      let source: 'pdf' | 'image' = 'pdf';
 
-        const pdfText = await processPDF(file);
-        if (pdfText) {
-          console.log('Texto extraído del PDF:', pdfText.substring(0, 100) + '...');
-          return pdfText;
+      if (file.type === 'application/pdf') {
+        console.log('Procesando PDF:', file.name);
+        if (await validatePDF(file)) {
+          extractedText = await processPDF(file);
+          
+          // Si no se encontró texto en el PDF, intenta procesarlo como imagen
+          if (!extractedText) {
+            console.log('PDF sin texto encontrado, intentando OCR...');
+            extractedText = await processImage(file);
+            source = 'image';
+          }
+        } else {
+          throw new Error('El archivo PDF no es válido');
         }
-        console.log('PDF no contiene texto seleccionable, procesando como imagen...');
+      } else if (validateImage(file)) {
+        console.log('Procesando imagen:', file.name);
+        if (validateImageSize(file)) {
+          extractedText = await processImage(file);
+          source = 'image';
+        } else {
+          throw new Error('La imagen excede el tamaño máximo permitido (10MB)');
+        }
+      } else {
+        throw new Error('Formato de archivo no soportado');
       }
 
-      // Convert file to base64 for OCR processing
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          if (typeof reader.result === 'string') {
-            const base64Data = reader.result.split(',')[1];
-            resolve(base64Data);
-          } else {
-            reject(new Error('Failed to convert file to base64'));
-          }
-        };
-        reader.onerror = () => reject(reader.error);
+      setResult({ text: extractedText, source });
+      toast({
+        title: "Archivo procesado exitosamente",
+        description: `Se ha extraído el texto del ${source === 'pdf' ? 'PDF' : 'imagen'}`
       });
-
-      reader.readAsDataURL(file);
-      const base64Data = await base64Promise;
-
-      // Call the process-document function for OCR
-      const { data, error } = await supabase.functions.invoke('process-document', {
-        body: {
-          filename: file.name,
-          contentType: file.type,
-          fileData: base64Data
-        }
-      });
-
-      if (error) throw error;
-
-      console.log('Respuesta del procesamiento OCR:', data);
-      return data.document.id;
 
     } catch (error) {
       console.error('Error procesando archivo:', error);
-      throw error;
-    }
-  };
-
-  const handleProcessFile = async () => {
-    if (!file) {
-      toast({
-        title: "No hay archivo",
-        description: "Por favor, selecciona un archivo primero.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      // Validar tipo de archivo
-      if (!file.type.match(/(application\/pdf|image\/(png|jpe?g))/)) {
-        throw new Error('Formato no soportado. Use PDF, PNG o JPG.');
-      }
-
-      const result = await processFile(file);
-      
-      toast({
-        title: "Archivo procesado exitosamente",
-        description: "El documento está siendo analizado. Los resultados estarán disponibles en breve.",
-      });
-
-      // Limpiar el formulario
-      setFile(null);
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-      if (input) input.value = '';
-
-    } catch (error) {
-      console.error('Error:', error);
       toast({
         title: "Error al procesar el archivo",
-        description: error instanceof Error ? error.message : "Ocurrió un error inesperado",
+        description: error instanceof Error ? error.message : "Error desconocido",
         variant: "destructive"
       });
+      setResult(null);
     } finally {
       setIsProcessing(false);
     }
   };
 
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+    
+    const file = acceptedFiles[0];
+    await processFile(file);
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'application/pdf': ['.pdf'],
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg']
+    },
+    multiple: false
+  });
+
   return (
-    <div className="w-full max-w-md mx-auto space-y-6 p-6 bg-white rounded-lg shadow-sm border">
-      <div className="space-y-2 text-center">
-        <h2 className="text-2xl font-semibold tracking-tight">Sube tu CV</h2>
-        <p className="text-sm text-muted-foreground">
-          Formatos soportados: PDF, PNG, JPG
-        </p>
-      </div>
-
-      <div className="space-y-4">
-        <div className="grid w-full max-w-sm items-center gap-1.5">
-          <Input
-            type="file"
-            accept=".pdf,.png,.jpg,.jpeg"
-            onChange={handleFileChange}
-            disabled={isProcessing}
-            className="cursor-pointer"
+    <div className="max-w-3xl mx-auto p-6">
+      <div 
+        {...getRootProps()} 
+        className={`
+          border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
+          transition-all duration-200 ease-in-out
+          ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'}
+        `}
+      >
+        <input {...getInputProps()} />
+        <div className="flex flex-col items-center justify-center space-y-4">
+          <Upload 
+            className={`h-12 w-12 ${
+              isDragActive ? 'text-blue-500' : 'text-gray-400'
+            }`}
           />
-          {file && (
-            <p className="text-sm text-muted-foreground">
-              Archivo seleccionado: {file.name}
+          <div className="space-y-2">
+            <p className="text-lg font-medium text-gray-700">
+              {isDragActive 
+                ? "Suelta el archivo aquí" 
+                : "Arrastra y suelta el archivo aquí"
+              }
             </p>
-          )}
+            <p className="text-sm text-gray-500">
+              o haz clic para buscar
+            </p>
+            <p className="text-xs text-gray-400">
+              Formatos soportados: PDF, PNG, JPG
+            </p>
+          </div>
         </div>
-
-        <Button
-          className="w-full"
-          onClick={handleProcessFile}
-          disabled={!file || isProcessing}
-        >
-          {isProcessing ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Procesando...
-            </>
-          ) : (
-            <>
-              <Upload className="mr-2 h-4 w-4" />
-              Procesar CV
-            </>
-          )}
-        </Button>
       </div>
+
+      {isProcessing && (
+        <div className="mt-6 text-center">
+          <div className="flex items-center justify-center space-x-2">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+            <span className="text-gray-600">Procesando archivo...</span>
+          </div>
+        </div>
+      )}
+
+      {result && !isProcessing && (
+        <div className="mt-6 p-4 bg-white rounded-lg border">
+          <div className="flex items-center space-x-2 mb-3">
+            {result.source === 'pdf' ? (
+              <FileText className="h-5 w-5 text-blue-500" />
+            ) : (
+              <FileSearch className="h-5 w-5 text-green-500" />
+            )}
+            <h3 className="text-lg font-medium">
+              Texto Extraído ({result.source === 'pdf' ? 'PDF' : 'OCR'})
+            </h3>
+          </div>
+          <div className="max-h-60 overflow-y-auto">
+            <p className="text-gray-700 whitespace-pre-wrap">
+              {result.text || 'No se encontró texto en el archivo'}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+};
+
+export default UploadCV;
