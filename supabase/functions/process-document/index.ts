@@ -333,16 +333,14 @@ serve(async (req) => {
       
       console.log('Realizando OCR...');
       const extractedText = await performOCR(fileData, accessToken);
-      
-      console.log('Actualizando documento con texto extraído:', extractedText ? 'Texto válido' : 'Sin texto válido');
+      console.log('Texto extraído exitosamente, actualizando documento...:', extractedText || 'Sin texto');
 
       const { error: updateError } = await supabaseAdmin
         .from('documents')
         .update({
-          processed_text: extractedText || 'No se pudo extraer texto del documento',
-          status: extractedText ? 'processed' : 'error',
+          processed_text: extractedText || 'No se pudo extraer texto',
+          status: 'processed',
           processed_at: new Date().toISOString(),
-          error: extractedText ? null : 'No se pudo extraer texto válido del documento'
         })
         .eq('id', document.id);
 
@@ -351,7 +349,7 @@ serve(async (req) => {
         throw updateError;
       }
 
-      console.log('processed_text actualizado exitosamente para documentId:', document.id);
+      console.log('processed_text actualizado exitosamente para documentId:', document.id, 'con texto:', extractedText || 'Sin texto');
 
       return new Response(
         JSON.stringify({
@@ -373,7 +371,8 @@ serve(async (req) => {
         .from('documents')
         .update({
           status: 'error',
-          error: error.message
+          error: error.message,
+          processed_at: new Date().toISOString(),
         })
         .eq('id', document.id);
 
