@@ -2,8 +2,8 @@
 import { getDocument, GlobalWorkerOptions, PDFDocumentProxy } from 'pdfjs-dist';
 
 // Configura el worker de pdf.js
-// En desarrollo, Vite servirá el worker desde node_modules
-GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${getDocument.version}/pdf.worker.min.js`;
+// En desarrollo, usamos CDN para el worker
+GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
 export const processPDF = async (file: File): Promise<string> => {
   try {
