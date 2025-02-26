@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.min.mjs";
@@ -46,17 +47,32 @@ async function extractTextWithPdfJs(fileData: string): Promise<string> {
     console.log('PDF cargado, páginas:', pdf.numPages);
 
     let text = '';
+    let hasExtractableText = false;
+
     for (let i = 1; i <= pdf.numPages; i++) {
       console.log(`Procesando página ${i}/${pdf.numPages}`);
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
       const pageText = content.items.map((item: any) => item.str).join(' ');
+      
+      if (pageText.trim().length > 0) {
+        hasExtractableText = true;
+      }
+      
       text += pageText + ' ';
       console.log(`Página ${i}: extraídos ${pageText.length} caracteres`);
     }
 
     const finalText = text.trim();
     console.log('Texto total extraído:', finalText.length, 'caracteres');
+    
+    // Si el texto extraído es muy corto o no contiene palabras significativas,
+    // consideramos que no hay texto extraíble
+    if (!hasExtractableText || finalText.length < 50) {
+      console.log('Texto extraído insuficiente, se procederá con OCR');
+      return '';
+    }
+    
     return finalText;
   } catch (error) {
     console.error('Error detallado en pdf.js:', error);
@@ -81,35 +97,56 @@ async function performOCR(fileData: string): Promise<string> {
 
     console.log('Cliente Vision API inicializado');
 
-    const request = {
-      image: {
-        content: fileData
-      },
-      features: [
-        {
-          type: 'DOCUMENT_TEXT_DETECTION'
-        }
-      ]
-    };
-
-    console.log('Enviando solicitud a Vision API...');
-    const [result] = await visionClient.textDetection(request);
-    console.log('Respuesta recibida de Vision API');
-
-    if (result.fullTextAnnotation) {
-      const extractedText = result.fullTextAnnotation.text;
-      console.log('Texto extraído con OCR:', extractedText.length, 'caracteres');
-      return extractedText;
+    // Divide el documento en segmentos si es muy grande
+    const maxBytes = 10485760; // 10MB
+    const segments = [];
+    let start = 0;
+    while (start < fileData.length) {
+      segments.push(fileData.slice(start, start + maxBytes));
+      start += maxBytes;
     }
 
-    console.log('No se encontró texto en la imagen');
-    return '';
+    console.log(`Documento dividido en ${segments.length} segmentos para OCR`);
+    let fullText = '';
+
+    for (let i = 0; i < segments.length; i++) {
+      console.log(`Procesando segmento ${i + 1}/${segments.length}`);
+      const request = {
+        image: {
+          content: segments[i]
+        },
+        features: [
+          {
+            type: 'DOCUMENT_TEXT_DETECTION',
+            maxResults: 1
+          }
+        ]
+      };
+
+      const [result] = await visionClient.textDetection(request);
+      
+      if (result.fullTextAnnotation) {
+        fullText += result.fullTextAnnotation.text + ' ';
+        console.log(`Texto extraído del segmento ${i + 1}:`, 
+          result.fullTextAnnotation.text.length, 'caracteres');
+      }
+    }
+
+    const extractedText = fullText.trim();
+    if (!extractedText) {
+      console.log('No se encontró texto en la imagen');
+      return '';
+    }
+
+    console.log('OCR completado exitosamente. Total caracteres:', extractedText.length);
+    return extractedText;
   } catch (error) {
     console.error('Error detallado en OCR:', error);
     if (error instanceof Error) {
       console.error('Stack trace:', error.stack);
+      console.error('Mensaje de error:', error.message);
     }
-    return '';
+    throw error; // Propagar el error para manejo superior
   }
 }
 
