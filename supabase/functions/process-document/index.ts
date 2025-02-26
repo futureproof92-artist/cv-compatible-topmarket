@@ -1,33 +1,15 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.min.mjs";
 import { create, verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 
-const ALLOWED_ORIGINS = {
-  production: 'https://cv-compatible-topmarket.lovable.app',
-  development: 'http://localhost:5173'
-};
-
-const getOrigin = () => {
-  const isProd = Deno.env.get('ENVIRONMENT') === 'production';
-  return isProd ? ALLOWED_ORIGINS.production : ALLOWED_ORIGINS.development;
-};
-
-const corsHeaders = (requestOrigin?: string) => {
-  const allowedOrigin = getOrigin();
-  
-  const origin = requestOrigin && (
-    requestOrigin === ALLOWED_ORIGINS.production || 
-    requestOrigin === ALLOWED_ORIGINS.development
-  ) ? requestOrigin : allowedOrigin;
-
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Max-Age': '86400',
-    'Access-Control-Allow-Credentials': 'true'
-  };
+const corsHeaders = {
+  'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Max-Age': '86400',
+  'Access-Control-Allow-Credentials': 'true'
 };
 
 async function extractTextWithPdfJs(fileData: string): Promise<string> {
@@ -153,7 +135,6 @@ async function performOCR(fileData: string, retryCount = 0): Promise<string> {
     console.error('Error detallado en OCR:', error);
     if (error instanceof Error) {
       console.error('Stack trace:', error.stack);
-      console.error('Mensaje de error:', error.message);
     }
     throw error;
   }
@@ -194,17 +175,16 @@ async function getAccessToken(credentials: any): Promise<string> {
 }
 
 serve(async (req) => {
-  const requestOrigin = req.headers.get('origin');
-  
+  // Manejar solicitud OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
     return new Response(null, { 
-      headers: corsHeaders(requestOrigin)
+      status: 204, 
+      headers: corsHeaders 
     });
   }
 
   try {
     console.log('Iniciando procesamiento de documento');
-    console.log('Origen de la solicitud:', requestOrigin);
     
     const { filename, contentType, fileData } = await req.json();
     
@@ -297,7 +277,7 @@ serve(async (req) => {
       }),
       { 
         headers: { 
-          ...corsHeaders(requestOrigin), 
+          ...corsHeaders,
           'Content-Type': 'application/json' 
         } 
       }
@@ -316,7 +296,7 @@ serve(async (req) => {
       }),
       { 
         status: 500,
-        headers: { ...corsHeaders(requestOrigin), 'Content-Type': 'application/json' }
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
   }
