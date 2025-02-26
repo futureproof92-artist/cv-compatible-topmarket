@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Progress } from "@/components/ui/progress";
 import UploadZone from '@/components/UploadZone';
 import RequirementsForm from '@/components/RequirementsForm';
+import { withRetry, defaultRetryConfig } from '@/utils/retryUtils';
 
 const Index = () => {
   const [files, setFiles] = useState<File[]>([]);
@@ -25,6 +26,7 @@ const Index = () => {
   const [loadingTexts, setLoadingTexts] = useState<{[key: string]: boolean}>({});
   const [uploadProgress, setUploadProgress] = useState(0);
   const [documentIds, setDocumentIds] = useState<{[key: string]: string}>({});
+  const [retryAttempts, setRetryAttempts] = useState<{[key: string]: number}>({});
 
   const handleFilesAccepted = useCallback((acceptedFiles: File[], processedData?: any) => {
     const newFiles = acceptedFiles.filter(file => 
@@ -43,19 +45,39 @@ const Index = () => {
     newFiles.forEach(file => {
       const reader = new FileReader();
       reader.onload = async () => {
-        const base64String = (reader.result as string).split(',')[1]; // Remover el prefijo "data:application/pdf;base64,"
+        const base64String = (reader.result as string).split(',')[1];
         
         try {
           console.log('Enviando archivo a procesar:', file.name);
-          const { data, error } = await supabase.functions.invoke('process-document', {
-            body: {
-              filename: file.name,
-              contentType: file.type,
-              fileData: base64String
-            }
-          });
+          
+          const processDocument = async () => {
+            const { data, error } = await supabase.functions.invoke('process-document', {
+              body: {
+                filename: file.name,
+                contentType: file.type,
+                fileData: base64String
+              }
+            });
+            
+            if (error) throw error;
+            return data;
+          };
 
-          if (error) throw error;
+          const data = await withRetry(
+            processDocument,
+            defaultRetryConfig,
+            (attempt, error) => {
+              console.log(`Reintento ${attempt} para ${file.name}:`, error);
+              setRetryAttempts(prev => ({
+                ...prev,
+                [file.name]: attempt
+              }));
+              toast({
+                title: `Reintentando proceso (${attempt}/3)`,
+                description: `Reintentando procesar ${file.name}...`,
+              });
+            }
+          );
 
           console.log('Respuesta del procesamiento:', data);
           
@@ -71,16 +93,32 @@ const Index = () => {
             
             let attempts = 0;
             const maxAttempts = 30;
+            
+            const pollDocument = async () => {
+              const { data: docData, error: docError } = await supabase
+                .from('documents')
+                .select('processed_text, status')
+                .eq('id', documentId)
+                .single();
+              
+              if (docError) throw docError;
+              return docData;
+            };
+
             const poll = async () => {
               while (attempts < maxAttempts) {
                 try {
-                  const { data: docData, error: docError } = await supabase
-                    .from('documents')
-                    .select('processed_text, status')
-                    .eq('id', documentId)
-                    .single();
-                  
-                  if (docError) throw docError;
+                  const docData = await withRetry(
+                    pollDocument,
+                    {
+                      maxRetries: 3,
+                      baseDelay: 1000,
+                      maxDelay: 4000
+                    },
+                    (attempt) => {
+                      console.log(`Reintento ${attempt} para verificar estado de ${file.name}`);
+                    }
+                  );
                   
                   if (docData?.status === 'processed' && docData?.processed_text) {
                     setProcessedTexts(prev => ({...prev, [documentId]: docData.processed_text}));
@@ -115,9 +153,10 @@ const Index = () => {
           }
         } catch (error) {
           console.error('Error procesando archivo:', error);
+          setRetryAttempts(prev => ({...prev, [file.name]: 0}));
           toast({
             title: "Error",
-            description: "Hubo un problema al procesar el archivo.",
+            description: "No se pudo procesar el archivo después de varios intentos.",
             variant: "destructive"
           });
         }
@@ -141,7 +180,7 @@ const Index = () => {
       title: "Archivos subidos exitosamente",
       description: `Se han agregado ${newFiles.length} archivo(s).`
     });
-  }, [files, toast, setDocumentIds, setLoadingTexts, setProcessedTexts, setUploadProgress]);
+  }, [files, toast, setDocumentIds, setLoadingTexts, setProcessedTexts, setUploadProgress, setRetryAttempts]);
 
   const removeFile = (index: number) => {
     const fileToRemove = files[index];
@@ -279,7 +318,14 @@ const Index = () => {
                         <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
                           <div className="flex items-center space-x-3">
                             <FileText className="h-5 w-5 text-blue-500" />
-                            <span className="text-sm text-gray-700">{file.name}</span>
+                            <span className="text-sm text-gray-700">
+                              {file.name}
+                              {retryAttempts[file.name] > 0 && (
+                                <span className="ml-2 text-xs text-yellow-600">
+                                  (Reintento {retryAttempts[file.name]}/3)
+                                </span>
+                              )}
+                            </span>
                           </div>
                           <button onClick={() => removeFile(index)} className="text-gray-400 hover:text-red-500 transition-colors">
                             <X className="h-5 w-5" />
