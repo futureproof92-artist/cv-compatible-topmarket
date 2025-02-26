@@ -1,4 +1,3 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.min.mjs";
@@ -6,7 +5,7 @@ import { create, verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 
 const ALLOWED_ORIGINS = {
   production: 'https://cv-compatible-topmarket.lovable.app',
-  development: 'http://localhost:8080'
+  development: 'http://localhost:5173'
 };
 
 const getOrigin = () => {
@@ -81,41 +80,6 @@ async function extractTextWithPdfJs(fileData: string): Promise<string> {
   }
 }
 
-// Función para generar un token JWT para autenticación con Google Cloud
-async function getAccessToken(credentials: any): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    iss: credentials.client_email,
-    sub: credentials.client_email,
-    aud: 'https://vision.googleapis.com/',
-    iat: now,
-    exp: now + 3600,
-    scope: 'https://www.googleapis.com/auth/cloud-vision'
-  };
-
-  const key = await crypto.subtle.importKey(
-    'pkcs8',
-    new TextEncoder().encode(credentials.private_key),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const jwt = await create({ alg: 'RS256', typ: 'JWT' }, payload, key);
-
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt
-    })
-  });
-
-  const tokenData = await tokenResponse.json();
-  return tokenData.access_token;
-}
-
 async function performOCR(fileData: string, retryCount = 0): Promise<string> {
   try {
     console.log('Iniciando OCR con Google Vision API REST');
@@ -158,7 +122,6 @@ async function performOCR(fileData: string, retryCount = 0): Promise<string> {
         const error = await response.json();
         console.error('Error en la respuesta de Vision API:', error);
         
-        // Retry con backoff exponencial si es un error temporal
         if (retryCount < 3 && (response.status === 429 || response.status >= 500)) {
           const delay = Math.pow(2, retryCount) * 1000;
           console.log(`Reintentando en ${delay}ms...`);
@@ -194,6 +157,40 @@ async function performOCR(fileData: string, retryCount = 0): Promise<string> {
     }
     throw error;
   }
+}
+
+async function getAccessToken(credentials: any): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: credentials.client_email,
+    sub: credentials.client_email,
+    aud: 'https://vision.googleapis.com/',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/cloud-vision'
+  };
+
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    new TextEncoder().encode(credentials.private_key),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const jwt = await create({ alg: 'RS256', typ: 'JWT' }, payload, key);
+
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    })
+  });
+
+  const tokenData = await tokenResponse.json();
+  return tokenData.access_token;
 }
 
 serve(async (req) => {
