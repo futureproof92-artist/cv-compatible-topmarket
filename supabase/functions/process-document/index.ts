@@ -2,7 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.min.mjs";
-import { createClient as createVisionClient } from 'https://esm.sh/@google-cloud/vision@4.0.2';
+import { create, verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 
 const ALLOWED_ORIGINS = {
   production: 'https://cv-compatible-topmarket.lovable.app',
@@ -66,8 +66,6 @@ async function extractTextWithPdfJs(fileData: string): Promise<string> {
     const finalText = text.trim();
     console.log('Texto total extraído:', finalText.length, 'caracteres');
     
-    // Si el texto extraído es muy corto o no contiene palabras significativas,
-    // consideramos que no hay texto extraíble
     if (!hasExtractableText || finalText.length < 50) {
       console.log('Texto extraído insuficiente, se procederá con OCR');
       return '';
@@ -83,24 +81,51 @@ async function extractTextWithPdfJs(fileData: string): Promise<string> {
   }
 }
 
-async function performOCR(fileData: string): Promise<string> {
+// Función para generar un token JWT para autenticación con Google Cloud
+async function getAccessToken(credentials: any): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: credentials.client_email,
+    sub: credentials.client_email,
+    aud: 'https://vision.googleapis.com/',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/cloud-vision'
+  };
+
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    new TextEncoder().encode(credentials.private_key),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const jwt = await create({ alg: 'RS256', typ: 'JWT' }, payload, key);
+
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt
+    })
+  });
+
+  const tokenData = await tokenResponse.json();
+  return tokenData.access_token;
+}
+
+async function performOCR(fileData: string, retryCount = 0): Promise<string> {
   try {
-    console.log('Iniciando OCR con Google Vision API');
-    const credentials = Deno.env.get('GOOGLE_CLOUD_VISION_CREDENTIALS');
-    if (!credentials) {
-      throw new Error('Credenciales de Google Cloud Vision no configuradas');
-    }
+    console.log('Iniciando OCR con Google Vision API REST');
+    const credentials = JSON.parse(Deno.env.get('GOOGLE_CLOUD_VISION_CREDENTIALS') || '{}');
+    const accessToken = await getAccessToken(credentials);
 
-    const visionClient = new createVisionClient({
-      credentials: JSON.parse(credentials)
-    });
-
-    console.log('Cliente Vision API inicializado');
-
-    // Divide el documento en segmentos si es muy grande
     const maxBytes = 10485760; // 10MB
     const segments = [];
     let start = 0;
+    
     while (start < fileData.length) {
       segments.push(fileData.slice(start, start + maxBytes));
       start += maxBytes;
@@ -111,24 +136,45 @@ async function performOCR(fileData: string): Promise<string> {
 
     for (let i = 0; i < segments.length; i++) {
       console.log(`Procesando segmento ${i + 1}/${segments.length}`);
-      const request = {
-        image: {
-          content: segments[i]
-        },
-        features: [
-          {
-            type: 'DOCUMENT_TEXT_DETECTION',
-            maxResults: 1
-          }
-        ]
-      };
-
-      const [result] = await visionClient.textDetection(request);
       
-      if (result.fullTextAnnotation) {
-        fullText += result.fullTextAnnotation.text + ' ';
-        console.log(`Texto extraído del segmento ${i + 1}:`, 
-          result.fullTextAnnotation.text.length, 'caracteres');
+      const response = await fetch('https://vision.googleapis.com/v1/images:annotate', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          requests: [{
+            image: { content: segments[i] },
+            features: [{ 
+              type: 'DOCUMENT_TEXT_DETECTION',
+              maxResults: 1
+            }]
+          }]
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('Error en la respuesta de Vision API:', error);
+        
+        // Retry con backoff exponencial si es un error temporal
+        if (retryCount < 3 && (response.status === 429 || response.status >= 500)) {
+          const delay = Math.pow(2, retryCount) * 1000;
+          console.log(`Reintentando en ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return performOCR(fileData, retryCount + 1);
+        }
+        
+        throw new Error(`Error en Vision API: ${error.error?.message || 'Unknown error'}`);
+      }
+
+      const result = await response.json();
+      const textAnnotation = result.responses[0]?.fullTextAnnotation;
+      
+      if (textAnnotation?.text) {
+        fullText += textAnnotation.text + ' ';
+        console.log(`Texto extraído del segmento ${i + 1}:`, textAnnotation.text.length, 'caracteres');
       }
     }
 
@@ -146,7 +192,7 @@ async function performOCR(fileData: string): Promise<string> {
       console.error('Stack trace:', error.stack);
       console.error('Mensaje de error:', error.message);
     }
-    throw error; // Propagar el error para manejo superior
+    throw error;
   }
 }
 
