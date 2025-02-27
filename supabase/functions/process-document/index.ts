@@ -1,7 +1,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
+import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
+import { getDocument, GlobalWorkerOptions } from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
+
+// Configuración del worker para pdfjs
+GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.worker.min.mjs";
 
 // Configuración de CORS
 const corsHeaders = {
@@ -10,10 +14,10 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// Extracción de texto de PDF usando pdf-lib
-async function extractTextWithPdfLib(fileData: string): Promise<string> {
+// Extracción de texto usando pdfjs-dist
+async function extractTextWithPdfJs(fileData: string): Promise<string> {
   try {
-    console.log('Iniciando extracción de texto con pdf-lib');
+    console.log('Iniciando extracción de texto con pdfjs-dist');
     
     // Convertir base64 a Uint8Array
     const binaryString = atob(fileData);
@@ -22,49 +26,43 @@ async function extractTextWithPdfLib(fileData: string): Promise<string> {
       bytes[i] = binaryString.charCodeAt(i);
     }
 
-    console.log('Base64 convertido a Uint8Array, cargando PDF con pdf-lib');
+    console.log('Base64 convertido a Uint8Array, cargando PDF con pdfjs-dist');
     
-    // Cargar el PDF usando pdf-lib
-    const pdfDoc = await PDFDocument.load(bytes);
-    const pageCount = pdfDoc.getPageCount();
+    // Cargar el PDF usando pdfjs-dist
+    const loadingTask = getDocument({ data: bytes });
+    const pdf = await loadingTask.promise;
+    
+    const pageCount = pdf.numPages;
     console.log(`PDF cargado correctamente. Número de páginas: ${pageCount}`);
     
-    // Extraer texto de cada página (pdf-lib no extrae texto directamente, 
-    // pero podemos extraer contenido de formularios y otros metadatos)
+    // Extraer texto de cada página
     let extractedText = '';
     
-    // Intentar extraer texto de los metadatos del documento
-    const title = pdfDoc.getTitle() || '';
-    const author = pdfDoc.getAuthor() || '';
-    const subject = pdfDoc.getSubject() || '';
-    const keywords = pdfDoc.getKeywords() || '';
-    const creator = pdfDoc.getCreator() || '';
-    const producer = pdfDoc.getProducer() || '';
+    for (let i = 1; i <= pageCount; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      
+      extractedText += pageText + '\n';
+      console.log(`Página ${i}: Extracción completada`);
+    }
     
-    // Agregar metadatos al texto extraído si existen
-    if (title) extractedText += `Título: ${title}\n`;
-    if (author) extractedText += `Autor: ${author}\n`;
-    if (subject) extractedText += `Asunto: ${subject}\n`;
-    if (keywords) extractedText += `Palabras clave: ${keywords}\n`;
-    if (creator) extractedText += `Creador: ${creator}\n`;
-    if (producer) extractedText += `Productor: ${producer}\n`;
-    
-    // Si tenemos al menos algunos metadatos pero no mucho texto, considerarlo como éxito parcial
-    const hasMetadata = extractedText.length > 0;
-    
-    console.log(`Texto extraído de metadatos: ${hasMetadata ? 'Sí' : 'No'}, longitud: ${extractedText.length}`);
+    const finalText = extractedText.trim();
+    console.log(`Texto extraído: ${finalText.length} caracteres`);
     
     // Si tenemos texto significativo (más de 100 caracteres)
-    if (extractedText.length > 100) {
-      console.log('Extracción de metadatos exitosa');
-      return extractedText;
+    if (finalText.length > 100) {
+      console.log('Extracción con pdfjs-dist exitosa');
+      return finalText;
     }
     
     // Si no pudimos obtener suficiente texto, es mejor usar OCR
-    console.log('Metadatos insuficientes, se usará OCR como respaldo');
+    console.log('Texto insuficiente, se usará OCR como respaldo');
     return '';
   } catch (error) {
-    console.error('Error en extracción de texto con pdf-lib:', error);
+    console.error('Error en extracción de texto con pdfjs-dist:', error);
     return '';
   }
 }
@@ -220,15 +218,15 @@ serve(async (req) => {
     if (contentType.includes('pdf') || contentType === 'application/pdf') {
       console.log('Iniciando estrategia de procesamiento para PDF');
       
-      // Usar pdf-lib para extraer texto
-      extractedText = await extractTextWithPdfLib(fileData);
+      // Usar pdfjs-dist para extraer texto
+      extractedText = await extractTextWithPdfJs(fileData);
       
       // Si no hay suficiente texto, usar OCR como respaldo
       if (!extractedText || extractedText.length < 100) {
-        console.log('Extracción con pdf-lib no efectiva, cambiando a OCR como respaldo');
+        console.log('Extracción con pdfjs-dist no efectiva, cambiando a OCR como respaldo');
         extractedText = await performOCR(fileData);
       } else {
-        console.log('Extracción con pdf-lib exitosa, no se requiere OCR');
+        console.log('Extracción con pdfjs-dist exitosa, no se requiere OCR');
       }
     } else {
       // Para otros formatos (imágenes), usar OCR directamente
