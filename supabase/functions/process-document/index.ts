@@ -28,25 +28,25 @@ serve(async (req) => {
       throw new Error("No se proporcionaron datos del archivo");
     }
 
-    // Configuramos las opciones de PDF.js si es necesario desactivar el worker
-    if (disableWorker) {
-      console.log("Desactivando worker de PDF.js");
-      // La configuración del worker ahora se manejará directamente al crear el documento
-    }
-
     // Creamos el cliente de Supabase
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Insertamos el documento en la base de datos
+    // Generamos un file_path único para el documento
+    // Esto es necesario porque file_path es un campo NOT NULL en la tabla documents
+    const fileExt = filename.split('.').pop() || '';
+    const filePath = `${crypto.randomUUID()}.${fileExt}`;
+
+    // Insertamos el documento en la base de datos sin el raw_data
+    // ya que ese campo no existe en la tabla
     const { data: document, error } = await supabase
       .from('documents')
       .insert({
         filename,
+        file_path: filePath,         // Campo requerido
         content_type: contentType,
-        status: 'uploaded',
-        raw_data: fileData
+        status: 'uploaded'
       })
       .select()
       .single();
@@ -59,6 +59,7 @@ serve(async (req) => {
     console.log(`Documento insertado con ID: ${document.id}`);
 
     // Iniciamos el procesamiento del texto en segundo plano
+    // Pasamos fileData como variable en memoria en lugar de almacenarlo en la BD
     processDocumentText(document.id, fileData, contentType, supabase, disableWorker).catch(error => {
       console.error(`Error procesando texto del documento ${document.id}:`, error);
     });
@@ -69,6 +70,7 @@ serve(async (req) => {
         document: {
           id: document.id,
           filename: document.filename,
+          file_path: document.file_path,
           contentType: document.content_type,
           status: document.status
         }
@@ -148,7 +150,7 @@ async function processDocumentText(documentId: string, fileData: string, content
       .from('documents')
       .update({
         status: 'error',
-        error_message: error.message || "Error desconocido en procesamiento de texto"
+        error: error.message || "Error desconocido en procesamiento de texto"
       })
       .eq('id', documentId);
     
