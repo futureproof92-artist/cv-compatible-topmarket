@@ -38,15 +38,15 @@ serve(async (req) => {
     const fileExt = filename.split('.').pop() || '';
     const filePath = `${crypto.randomUUID()}.${fileExt}`;
 
-    // Insertamos el documento en la base de datos sin el raw_data
-    // ya que ese campo no existe en la tabla
+    // Insertamos el documento en la base de datos usando uno de los valores permitidos para status:
+    // 'pending', 'processing', 'processed', 'error'
     const { data: document, error } = await supabase
       .from('documents')
       .insert({
         filename,
-        file_path: filePath,         // Campo requerido
+        file_path: filePath,
         content_type: contentType,
-        status: 'uploaded'
+        status: 'pending'  // Cambiado de 'uploaded' a 'pending' para cumplir con la restricción
       })
       .select()
       .single();
@@ -125,6 +125,11 @@ async function processDocumentText(documentId: string, fileData: string, content
     }
     
     console.log(`Texto extraído para documento ${documentId} (primeros 100 caracteres): ${processedText.substring(0, 100)}...`);
+    
+    // Verificación para satisfacer la restricción de longitud de processed_text
+    if (!processedText || processedText.trim().length === 0) {
+      throw new Error("No se pudo extraer texto del documento");
+    }
     
     // Actualizamos el documento con el texto procesado
     const { error } = await supabase
