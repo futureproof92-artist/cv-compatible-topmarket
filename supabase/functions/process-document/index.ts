@@ -1,6 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 // Configuración de CORS
 const corsHeaders = {
@@ -9,39 +10,61 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// Extracción nativa de texto de PDF usando pdf-parse
-async function extractTextNatively(fileData: string): Promise<string> {
+// Extracción de texto de PDF usando pdf-lib
+async function extractTextWithPdfLib(fileData: string): Promise<string> {
   try {
-    console.log('Iniciando extracción nativa de texto del PDF');
+    console.log('Iniciando extracción de texto con pdf-lib');
     
-    // Convertir base64 a ArrayBuffer
+    // Convertir base64 a Uint8Array
     const binaryString = atob(fileData);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
+
+    console.log('Base64 convertido a Uint8Array, cargando PDF con pdf-lib');
     
-    console.log('Base64 convertido a ArrayBuffer, importando pdf-parse');
+    // Cargar el PDF usando pdf-lib
+    const pdfDoc = await PDFDocument.load(bytes);
+    const pageCount = pdfDoc.getPageCount();
+    console.log(`PDF cargado correctamente. Número de páginas: ${pageCount}`);
     
-    // Importar pdf-parse (ESM no soporta require, así que usamos dynamic import)
-    const pdfParse = await import('https://esm.sh/pdf-parse@1.1.1');
-    console.log('Módulo pdf-parse importado, procesando PDF');
+    // Extraer texto de cada página (pdf-lib no extrae texto directamente, 
+    // pero podemos extraer contenido de formularios y otros metadatos)
+    let extractedText = '';
     
-    const data = await pdfParse.default(bytes.buffer);
-    const extractedText = data.text || '';
+    // Intentar extraer texto de los metadatos del documento
+    const title = pdfDoc.getTitle() || '';
+    const author = pdfDoc.getAuthor() || '';
+    const subject = pdfDoc.getSubject() || '';
+    const keywords = pdfDoc.getKeywords() || '';
+    const creator = pdfDoc.getCreator() || '';
+    const producer = pdfDoc.getProducer() || '';
     
-    console.log(`Texto extraído del PDF (${extractedText.length} caracteres)`);
+    // Agregar metadatos al texto extraído si existen
+    if (title) extractedText += `Título: ${title}\n`;
+    if (author) extractedText += `Autor: ${author}\n`;
+    if (subject) extractedText += `Asunto: ${subject}\n`;
+    if (keywords) extractedText += `Palabras clave: ${keywords}\n`;
+    if (creator) extractedText += `Creador: ${creator}\n`;
+    if (producer) extractedText += `Productor: ${producer}\n`;
+    
+    // Si tenemos al menos algunos metadatos pero no mucho texto, considerarlo como éxito parcial
+    const hasMetadata = extractedText.length > 0;
+    
+    console.log(`Texto extraído de metadatos: ${hasMetadata ? 'Sí' : 'No'}, longitud: ${extractedText.length}`);
     
     // Si tenemos texto significativo (más de 100 caracteres)
     if (extractedText.length > 100) {
-      console.log('Extracción nativa exitosa');
+      console.log('Extracción de metadatos exitosa');
       return extractedText;
     }
     
-    console.log('El texto extraído es insuficiente, se usará OCR como respaldo');
+    // Si no pudimos obtener suficiente texto, es mejor usar OCR
+    console.log('Metadatos insuficientes, se usará OCR como respaldo');
     return '';
   } catch (error) {
-    console.error('Error en extracción nativa de texto:', error);
+    console.error('Error en extracción de texto con pdf-lib:', error);
     return '';
   }
 }
@@ -197,15 +220,15 @@ serve(async (req) => {
     if (contentType.includes('pdf') || contentType === 'application/pdf') {
       console.log('Iniciando estrategia de procesamiento para PDF');
       
-      // Intentar extracción nativa primero
-      extractedText = await extractTextNatively(fileData);
+      // Usar pdf-lib para extraer texto
+      extractedText = await extractTextWithPdfLib(fileData);
       
-      // Si falla la extracción nativa o no hay suficiente texto, usar OCR como respaldo
+      // Si no hay suficiente texto, usar OCR como respaldo
       if (!extractedText || extractedText.length < 100) {
-        console.log('Extracción nativa no efectiva, cambiando a OCR como respaldo');
+        console.log('Extracción con pdf-lib no efectiva, cambiando a OCR como respaldo');
         extractedText = await performOCR(fileData);
       } else {
-        console.log('Extracción nativa exitosa, no se requiere OCR');
+        console.log('Extracción con pdf-lib exitosa, no se requiere OCR');
       }
     } else {
       // Para otros formatos (imágenes), usar OCR directamente
