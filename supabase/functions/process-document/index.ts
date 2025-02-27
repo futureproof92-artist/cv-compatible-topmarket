@@ -31,10 +31,7 @@ serve(async (req) => {
     // Configuramos las opciones de PDF.js si es necesario desactivar el worker
     if (disableWorker) {
       console.log("Desactivando worker de PDF.js");
-      // @ts-ignore - Ignoramos el error de TS porque sabemos que estas propiedades existen
-      pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-      // @ts-ignore
-      pdfjsLib.disableWorker = true;
+      // La configuración del worker ahora se manejará directamente al crear el documento
     }
 
     // Creamos el cliente de Supabase
@@ -62,7 +59,7 @@ serve(async (req) => {
     console.log(`Documento insertado con ID: ${document.id}`);
 
     // Iniciamos el procesamiento del texto en segundo plano
-    processDocumentText(document.id, fileData, contentType, supabase).catch(error => {
+    processDocumentText(document.id, fileData, contentType, supabase, disableWorker).catch(error => {
       console.error(`Error procesando texto del documento ${document.id}:`, error);
     });
 
@@ -97,7 +94,7 @@ serve(async (req) => {
   }
 });
 
-async function processDocumentText(documentId: string, fileData: string, contentType: string, supabase: any) {
+async function processDocumentText(documentId: string, fileData: string, contentType: string, supabase: any, disableWorker?: boolean) {
   try {
     console.log(`Iniciando procesamiento de texto para documento ${documentId}`);
     
@@ -112,7 +109,7 @@ async function processDocumentText(documentId: string, fileData: string, content
     // Procesamos según el tipo de contenido
     if (contentType.includes('pdf')) {
       console.log('Procesando PDF...');
-      processedText = await extractTextFromPdf(fileData);
+      processedText = await extractTextFromPdf(fileData, disableWorker);
     } else if (contentType.includes('image')) {
       console.log('Procesando imagen...');
       processedText = await extractTextFromImage(fileData);
@@ -159,7 +156,7 @@ async function processDocumentText(documentId: string, fileData: string, content
   }
 }
 
-async function extractTextFromPdf(base64Data: string) {
+async function extractTextFromPdf(base64Data: string, disableWorker?: boolean) {
   try {
     console.log('Iniciando extracción de texto con pdfjs-dist...');
     
@@ -170,8 +167,20 @@ async function extractTextFromPdf(base64Data: string) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     
-    // Cargamos el documento PDF
-    const loadingTask = pdfjsLib.getDocument({ data: bytes });
+    // Configuramos las opciones para cargar el PDF
+    const pdfOptions: any = { data: bytes };
+    
+    // Aplicamos las opciones para deshabilitar el worker si es necesario
+    if (disableWorker) {
+      console.log('Aplicando configuración para deshabilitar worker en getDocument');
+      pdfOptions.useWorkerFetch = false;
+      pdfOptions.isEvalSupported = false;
+      pdfOptions.disableWorker = true;
+    }
+    
+    // Cargamos el documento PDF con las opciones configuradas
+    console.log('Cargando documento PDF con opciones:', JSON.stringify(pdfOptions));
+    const loadingTask = pdfjsLib.getDocument(pdfOptions);
     const pdf = await loadingTask.promise;
     console.log(`PDF cargado. Número de páginas: ${pdf.numPages}`);
     
