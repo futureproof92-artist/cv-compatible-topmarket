@@ -1,345 +1,378 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
-import { getDocument, GlobalWorkerOptions } from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
 
-// Configuración del worker para pdfjs
-GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.worker.min.mjs";
-
-// Configuración de CORS
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-// Extracción de texto usando pdfjs-dist
-async function extractTextWithPdfJs(fileData: string): Promise<string> {
-  try {
-    console.log('Iniciando extracción de texto con pdfjs-dist');
-    
-    // Convertir base64 a Uint8Array
-    const binaryString = atob(fileData);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    console.log('Base64 convertido a Uint8Array, cargando PDF con pdfjs-dist');
-    
-    // Cargar el PDF usando pdfjs-dist
-    const loadingTask = getDocument({ data: bytes });
-    const pdf = await loadingTask.promise;
-    
-    const pageCount = pdf.numPages;
-    console.log(`PDF cargado correctamente. Número de páginas: ${pageCount}`);
-    
-    // Extraer texto de cada página
-    let extractedText = '';
-    
-    for (let i = 1; i <= pageCount; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ');
-      
-      extractedText += pageText + '\n';
-      console.log(`Página ${i}: Extracción completada`);
-    }
-    
-    const finalText = extractedText.trim();
-    console.log(`Texto extraído: ${finalText.length} caracteres`);
-    
-    // Si tenemos texto significativo (más de 100 caracteres)
-    if (finalText.length > 100) {
-      console.log('Extracción con pdfjs-dist exitosa');
-      return finalText;
-    }
-    
-    // Si no pudimos obtener suficiente texto, es mejor usar OCR
-    console.log('Texto insuficiente, se usará OCR como respaldo');
-    return '';
-  } catch (error) {
-    console.error('Error en extracción de texto con pdfjs-dist:', error);
-    return '';
-  }
-}
-
-async function performOCR(fileData: string): Promise<string> {
-  try {
-    console.log('Iniciando OCR con Google Vision API');
-    const credentials = JSON.parse(Deno.env.get('GOOGLE_CLOUD_VISION_CREDENTIALS') || '{}');
-    
-    if (!credentials.client_email || !credentials.private_key) {
-      throw new Error('Credenciales de Google Cloud Vision incompletas o no configuradas');
-    }
-    
-    console.log('Obteniendo token de acceso para Google Vision API');
-    const accessToken = await getAccessToken(credentials);
-    console.log('Token de acceso obtenido, iniciando procesamiento OCR');
-
-    const response = await fetch('https://vision.googleapis.com/v1/images:annotate', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        requests: [{
-          image: { content: fileData },
-          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
-        }]
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      console.error('Error en la respuesta de Vision API:', response.status, error);
-      throw new Error(`Error en Vision API: ${error.error?.message || response.status}`);
-    }
-
-    const result = await response.json();
-    const textAnnotation = result.responses[0]?.fullTextAnnotation;
-    
-    if (textAnnotation?.text) {
-      console.log(`OCR completado, texto extraído (${textAnnotation.text.length} caracteres)`);
-      return textAnnotation.text;
-    }
-    
-    console.log('OCR completado, pero no se encontró texto');
-    return '';
-  } catch (error) {
-    console.error('Error en OCR:', error);
-    throw error;
-  }
-}
-
-async function getAccessToken(credentials: any): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    iss: credentials.client_email,
-    sub: credentials.client_email,
-    aud: 'https://vision.googleapis.com/',
-    iat: now,
-    exp: now + 3600,
-    scope: 'https://www.googleapis.com/auth/cloud-vision'
-  };
-
-  const key = await crypto.subtle.importKey(
-    'pkcs8',
-    new TextEncoder().encode(credentials.private_key),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const jwt = await create({ alg: 'RS256', typ: 'JWT' }, payload, key);
-
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: jwt
-    })
-  });
-
-  const tokenData = await tokenResponse.json();
-  return tokenData.access_token;
-}
-
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // Manejo de CORS para solicitudes OPTIONS
   if (req.method === 'OPTIONS') {
-    console.log('Recibida solicitud OPTIONS (CORS preflight)');
-    return new Response(null, { 
-      status: 204, 
-      headers: corsHeaders 
+    return new Response(null, {
+      headers: corsHeaders,
+      status: 204,
     });
   }
-  
-  try {
-    console.log('Iniciando procesamiento de documento');
-    
-    // Extraer y validar datos de entrada
-    const { filename, contentType, fileData } = await req.json();
-    
-    if (!fileData) {
-      throw new Error('Se requiere fileData');
-    }
-    
-    if (!filename) {
-      throw new Error('Se requiere filename');
-    }
-    
-    if (!contentType) {
-      throw new Error('Se requiere contentType');
-    }
-    
-    console.log(`Archivo recibido para procesamiento: ${filename}, tipo: ${contentType}`);
 
-    // Inicializar cliente Supabase
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  try {
+    const reqData = await req.json();
     
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error('Configuración de Supabase incompleta');
+    const { filename, contentType, fileData, disableWorker } = reqData;
+    
+    console.log(`Procesando archivo: ${filename}, tipo: ${contentType}, disableWorker: ${disableWorker}`);
+
+    if (!fileData) {
+      throw new Error("No se proporcionaron datos del archivo");
     }
-    
+
+    // Configuramos las opciones de PDF.js si es necesario desactivar el worker
+    if (disableWorker) {
+      console.log("Desactivando worker de PDF.js");
+      // @ts-ignore - Ignoramos el error de TS porque sabemos que estas propiedades existen
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+      // @ts-ignore
+      pdfjsLib.disableWorker = true;
+    }
+
+    // Creamos el cliente de Supabase
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     const supabase = createClient(supabaseUrl, supabaseKey);
-    
-    // Crear registro en la base de datos
-    console.log('Creando registro en la base de datos');
-    const filePath = `documents/${filename.toLowerCase().replace(/[^a-z0-9]/g, '_')}-${crypto.randomUUID()}.${filename.split('.').pop()}`;
-    
-    const { data: document, error: insertError } = await supabase
+
+    // Insertamos el documento en la base de datos
+    const { data: document, error } = await supabase
       .from('documents')
       .insert({
         filename,
         content_type: contentType,
-        status: 'processing',
-        file_path: filePath
+        status: 'uploaded',
+        raw_data: fileData
       })
       .select()
       .single();
 
-    if (insertError) {
-      console.error('Error al crear registro en la base de datos:', insertError);
-      throw insertError;
-    }
-    
-    console.log(`Registro creado en base de datos, ID: ${document.id}`);
-
-    let extractedText = '';
-    
-    // Estrategia en capas para extracción de texto
-    if (contentType.includes('pdf') || contentType === 'application/pdf') {
-      console.log('Iniciando estrategia de procesamiento para PDF');
-      
-      // Usar pdfjs-dist para extraer texto
-      extractedText = await extractTextWithPdfJs(fileData);
-      
-      // Si no hay suficiente texto, usar OCR como respaldo
-      if (!extractedText || extractedText.length < 100) {
-        console.log('Extracción con pdfjs-dist no efectiva, cambiando a OCR como respaldo');
-        extractedText = await performOCR(fileData);
-      } else {
-        console.log('Extracción con pdfjs-dist exitosa, no se requiere OCR');
-      }
-    } else {
-      // Para otros formatos (imágenes), usar OCR directamente
-      console.log('Documento no es PDF, procesando directamente con OCR');
-      extractedText = await performOCR(fileData);
-    }
-    
-    // Procesar resultado
-    console.log('Procesamiento de texto completado');
-    
-    const finalText = extractedText.trim() || 'No se pudo extraer texto';
-    
-    // Actualizar registro en la base de datos
-    console.log('Actualizando registro con texto extraído');
-    const { error: updateError } = await supabase
-      .from('documents')
-      .update({
-        processed_text: finalText,
-        status: 'processed',
-        processed_at: new Date().toISOString()
-      })
-      .eq('id', document.id);
-
-    if (updateError) {
-      console.error('Error al actualizar registro:', updateError);
-      throw updateError;
-    }
-    
-    // Subir archivo a Storage
-    console.log('Subiendo archivo a Storage');
-    const fileBytes = Uint8Array.from(atob(fileData), c => c.charCodeAt(0));
-    
-    const { error: storageError } = await supabase.storage
-      .from('cv_uploads')
-      .upload(filePath, fileBytes, {
-        contentType,
-        upsert: false
-      });
-
-    if (storageError) {
-      console.error('Error al subir archivo a Storage:', storageError);
-      throw storageError;
+    if (error) {
+      console.error('Error insertando documento:', error);
+      throw error;
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('cv_uploads')
-      .getPublicUrl(filePath);
-      
-    console.log('Procesamiento completado exitosamente');
-    
+    console.log(`Documento insertado con ID: ${document.id}`);
+
+    // Iniciamos el procesamiento del texto en segundo plano
+    processDocumentText(document.id, fileData, contentType, supabase).catch(error => {
+      console.error(`Error procesando texto del documento ${document.id}:`, error);
+    });
+
     return new Response(
       JSON.stringify({
         success: true,
         document: {
           id: document.id,
           filename: document.filename,
-          status: 'processed',
-          file_path: filePath,
-          public_url: publicUrl,
-          extracted_text: finalText
+          contentType: document.content_type,
+          status: document.status
         }
       }),
-      { 
-        headers: { 
-          ...corsHeaders,
-          'Content-Type': 'application/json' 
-        } 
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200,
       }
     );
-
   } catch (error) {
     console.error('Error en process-document:', error);
     
     return new Response(
-      JSON.stringify({ 
-        error: 'Error procesando documento', 
-        details: error instanceof Error ? error.message : String(error)
+      JSON.stringify({
+        success: false,
+        error: error.message || "Error desconocido"
       }),
-      { 
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     );
   }
 });
 
-async function create(header: { alg: string, typ: string }, payload: any, key: CryptoKey) {
-  const encoder = new TextEncoder();
+async function processDocumentText(documentId: string, fileData: string, contentType: string, supabase: any) {
+  try {
+    console.log(`Iniciando procesamiento de texto para documento ${documentId}`);
+    
+    // Actualizamos el estado del documento a 'processing'
+    await supabase
+      .from('documents')
+      .update({ status: 'processing' })
+      .eq('id', documentId);
+    
+    let processedText = '';
+    
+    // Procesamos según el tipo de contenido
+    if (contentType.includes('pdf')) {
+      console.log('Procesando PDF...');
+      processedText = await extractTextFromPdf(fileData);
+    } else if (contentType.includes('image')) {
+      console.log('Procesando imagen...');
+      processedText = await extractTextFromImage(fileData);
+    } else if (contentType.includes('word')) {
+      console.log('Procesando documento Word...');
+      // Placeholder para procesamiento de documentos Word
+      processedText = "Procesamiento de documentos Word no implementado aún";
+    } else {
+      console.log(`Tipo de contenido no soportado: ${contentType}`);
+      throw new Error(`Tipo de contenido no soportado: ${contentType}`);
+    }
+    
+    console.log(`Texto extraído para documento ${documentId} (primeros 100 caracteres): ${processedText.substring(0, 100)}...`);
+    
+    // Actualizamos el documento con el texto procesado
+    const { error } = await supabase
+      .from('documents')
+      .update({
+        processed_text: processedText,
+        status: 'processed',
+        processed_at: new Date().toISOString()
+      })
+      .eq('id', documentId);
+    
+    if (error) {
+      console.error('Error actualizando documento con texto procesado:', error);
+      throw error;
+    }
+    
+    console.log(`Procesamiento de texto completado para documento ${documentId}`);
+  } catch (error) {
+    console.error(`Error en processDocumentText para documento ${documentId}:`, error);
+    
+    // Actualizamos el estado del documento a 'error'
+    await supabase
+      .from('documents')
+      .update({
+        status: 'error',
+        error_message: error.message || "Error desconocido en procesamiento de texto"
+      })
+      .eq('id', documentId);
+    
+    throw error;
+  }
+}
+
+async function extractTextFromPdf(base64Data: string) {
+  try {
+    console.log('Iniciando extracción de texto con pdfjs-dist...');
+    
+    // Decodificamos los datos base64 a un array de bytes
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Cargamos el documento PDF
+    const loadingTask = pdfjsLib.getDocument({ data: bytes });
+    const pdf = await loadingTask.promise;
+    console.log(`PDF cargado. Número de páginas: ${pdf.numPages}`);
+    
+    let fullText = '';
+    
+    // Extraemos el texto de cada página
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      console.log(`Procesando página ${pageNum}/${pdf.numPages}...`);
+      const page = await pdf.getPage(pageNum);
+      const content = await page.getTextContent();
+      
+      // Concatenamos el texto de todos los elementos de texto en la página
+      const pageText = content.items
+        .map((item: any) => item.str)
+        .join(' ');
+      
+      fullText += pageText + '\n\n';
+    }
+    
+    console.log(`Extracción de texto completada. Longitud: ${fullText.length} caracteres`);
+    
+    // Si el texto está vacío o es demasiado corto, podría indicar un problema con el PDF
+    if (fullText.length < 50) {
+      console.log('El texto extraído es muy corto, posiblemente un PDF escaneado o con imagen.');
+      throw new Error('El PDF parece no contener texto extraíble. Posiblemente es un PDF escaneado o basado en imágenes.');
+    }
+    
+    return fullText;
+  } catch (error) {
+    console.error('Error en extracción de texto con pdfjs-dist:', error);
+    
+    // Para PDFs escaneados o con problemas, intentamos usar OCR como fallback
+    console.log('Intentando extracción con OCR como fallback...');
+    return await extractTextFromImage(base64Data);
+  }
+}
+
+async function extractTextFromImage(base64Data: string) {
+  try {
+    console.log('Iniciando extracción de texto de imagen con Vision API...');
+    
+    // Obtenemos las credenciales de Google Cloud Vision
+    const credentialsString = Deno.env.get('GOOGLE_CLOUD_VISION_CREDENTIALS');
+    if (!credentialsString) {
+      throw new Error('No se encontraron credenciales para Google Cloud Vision');
+    }
+    
+    // Parseamos las credenciales
+    const credentials = JSON.parse(credentialsString);
+    
+    // Obtenemos un token de acceso
+    console.log('Obteniendo token de acceso...');
+    const tokenResponse = await fetch(
+      `https://oauth2.googleapis.com/token`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+          assertion: await createJWT(credentials),
+        }),
+      }
+    );
+    
+    const tokenData = await tokenResponse.json();
+    
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error('Error obteniendo token de acceso:', tokenData);
+      throw new Error('No se pudo obtener token de acceso para Vision API');
+    }
+    
+    console.log('Access token obtenido exitosamente');
+    
+    // Realizamos la solicitud a la API de Vision
+    console.log('Enviando solicitud a Vision API...');
+    const visionResponse = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          requests: [
+            {
+              image: {
+                content: base64Data,
+              },
+              features: [
+                {
+                  type: 'TEXT_DETECTION',
+                  maxResults: 1,
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+    
+    const visionData = await visionResponse.json();
+    
+    if (!visionResponse.ok || !visionData.responses || visionData.responses.length === 0) {
+      console.error('Error en respuesta de Vision API:', visionData);
+      throw new Error('Error al procesar la imagen con Vision API');
+    }
+    
+    console.log('Respuesta de Vision API recibida');
+    
+    // Extraemos el texto de la respuesta
+    const textAnnotation = visionData.responses[0].fullTextAnnotation;
+    
+    if (!textAnnotation) {
+      console.log('No se encontró texto en la imagen');
+      return '';
+    }
+    
+    console.log(`Texto extraído de la imagen. Longitud: ${textAnnotation.text.length} caracteres`);
+    return textAnnotation.text;
+  } catch (error) {
+    console.error('Error en extractTextFromImage:', error);
+    throw new Error(`Error procesando imagen: ${error.message}`);
+  }
+}
+
+async function createJWT(credentials: any) {
+  // Implementación simple de JWT para autenticación de Google Cloud
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT',
+    kid: credentials.private_key_id,
+  };
   
-  const headerStr = JSON.stringify(header);
-  const encodedHeader = btoa(headerStr)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: credentials.client_email,
+    sub: credentials.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+  };
   
-  const payloadStr = JSON.stringify(payload);
-  const encodedPayload = btoa(payloadStr)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
+  const encodedHeader = btoa(JSON.stringify(header))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
   
-  const signatureInput = encoder.encode(`${encodedHeader}.${encodedPayload}`);
+  const encodedPayload = btoa(JSON.stringify(payload))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
   
-  const signatureBuffer = await crypto.subtle.sign(
-    { name: "RSASSA-PKCS1-v1_5" },
-    key,
-    signatureInput
+  const signatureInput = `${encodedHeader}.${encodedPayload}`;
+  
+  // Importamos la clave privada para firmar
+  const privateKey = credentials.private_key;
+  const keyData = privateKey
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\n/g, '');
+  
+  const binaryKey = atob(keyData);
+  const len = binaryKey.length;
+  const keyBytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    keyBytes[i] = binaryKey.charCodeAt(i);
+  }
+  
+  const algorithm = { name: 'RSASSA-PKCS1-v1_5', hash: { name: 'SHA-256' } };
+  const extractable = false;
+  const keyUsages = ['sign'] as KeyUsage[];
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    keyBytes,
+    algorithm,
+    extractable,
+    keyUsages
   );
   
-  const signature = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
+  const encoder = new TextEncoder();
+  const signatureBuffer = await crypto.subtle.sign(
+    algorithm.name,
+    cryptoKey,
+    encoder.encode(signatureInput)
+  );
   
-  return `${encodedHeader}.${encodedPayload}.${signature}`;
+  const signatureArray = new Uint8Array(signatureBuffer);
+  let signature = '';
+  for (let i = 0; i < signatureArray.length; i++) {
+    signature += String.fromCharCode(signatureArray[i]);
+  }
+  
+  const encodedSignature = btoa(signature)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  
+  return `${signatureInput}.${encodedSignature}`;
 }

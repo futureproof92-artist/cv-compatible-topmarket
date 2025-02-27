@@ -44,7 +44,8 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
         body: {
           filename: file.name,
           contentType: file.type,
-          fileData: base64File
+          fileData: base64File,
+          disableWorker: true // Añadimos esta opción para indicar que queremos desactivar el worker
         }
       });
 
