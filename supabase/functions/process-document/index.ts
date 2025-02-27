@@ -1,8 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.min.mjs";
-import { create, verify } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
+import { create } from "https://deno.land/x/djwt@v3.0.1/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': 'https://cv-compatible-topmarket.lovable.app',
@@ -12,59 +11,9 @@ const corsHeaders = {
   'Access-Control-Allow-Credentials': 'true'
 };
 
-async function extractTextWithPdfJs(fileData: string): Promise<string> {
-  try {
-    console.log('Iniciando extracción de texto con pdf.js');
-    
-    const uint8Array = new Uint8Array(atob(fileData).split('').map(char => char.charCodeAt(0)));
-    console.log('Archivo convertido a Uint8Array, longitud:', uint8Array.length);
-
-    const workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.269/build/pdf.worker.min.mjs';
-    pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-
-    console.log('Cargando PDF...');
-    const loadingTask = pdfjs.getDocument({ data: uint8Array });
-    const pdf = await loadingTask.promise;
-    console.log('PDF cargado, páginas:', pdf.numPages);
-
-    let text = '';
-    let hasExtractableText = false;
-
-    for (let i = 1; i <= pdf.numPages; i++) {
-      console.log(`Procesando página ${i}/${pdf.numPages}`);
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items.map((item: any) => item.str).join(' ');
-      
-      if (pageText.trim().length > 0) {
-        hasExtractableText = true;
-      }
-      
-      text += pageText + ' ';
-      console.log(`Página ${i}: extraídos ${pageText.length} caracteres`);
-    }
-
-    const finalText = text.trim();
-    console.log('Texto total extraído:', finalText.length, 'caracteres');
-    
-    if (!hasExtractableText || finalText.length < 50) {
-      console.log('Texto extraído insuficiente, se procederá con OCR');
-      return '';
-    }
-    
-    return finalText;
-  } catch (error) {
-    console.error('Error detallado en pdf.js:', error);
-    if (error instanceof Error) {
-      console.error('Stack trace:', error.stack);
-    }
-    return '';
-  }
-}
-
 async function performOCR(fileData: string, retryCount = 0): Promise<string> {
   try {
-    console.log('Iniciando OCR con Google Vision API REST');
+    console.log('Iniciando OCR con Google Vision API');
     const credentials = JSON.parse(Deno.env.get('GOOGLE_CLOUD_VISION_CREDENTIALS') || '{}');
     const accessToken = await getAccessToken(credentials);
 
@@ -175,7 +124,6 @@ async function getAccessToken(credentials: any): Promise<string> {
 }
 
 serve(async (req) => {
-  // Manejar solicitud OPTIONS (preflight)
   if (req.method === 'OPTIONS') {
     return new Response(null, { 
       status: 204, 
@@ -214,21 +162,9 @@ serve(async (req) => {
       throw insertError;
     }
 
-    let extractedText = '';
+    console.log('Procesando documento con OCR...');
+    const extractedText = await performOCR(fileData);
     
-    if (contentType === 'application/pdf') {
-      console.log('Procesando PDF...');
-      extractedText = await extractTextWithPdfJs(fileData);
-      
-      if (!extractedText) {
-        console.log('No se extrajo texto con pdf.js, intentando OCR...');
-        extractedText = await performOCR(fileData);
-      }
-    } else {
-      console.log('Procesando imagen directamente con OCR...');
-      extractedText = await performOCR(fileData);
-    }
-
     console.log('Actualizando registro con texto extraído...');
     const finalText = extractedText.trim() || 'No se pudo extraer texto';
     const { error: updateError } = await supabaseClient
