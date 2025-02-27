@@ -11,6 +11,42 @@ const corsHeaders = {
   'Access-Control-Allow-Credentials': 'true'
 };
 
+// Extracción nativa de texto de PDF usando pdf-parse
+async function extractTextNatively(fileData: string): Promise<string> {
+  try {
+    console.log('Iniciando extracción nativa de texto del PDF');
+    
+    // Convertir base64 a ArrayBuffer
+    const binaryString = atob(fileData);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Importar pdf-parse (ESM no soporta require, así que usamos dynamic import)
+    const pdfParse = await import('https://esm.sh/pdf-parse@1.1.1');
+    
+    console.log('Procesando PDF con pdf-parse...');
+    const data = await pdfParse.default(bytes.buffer);
+    
+    // Verificar que el texto sea significativo
+    const extractedText = data.text || '';
+    console.log(`Texto extraído: ${extractedText.length} caracteres`);
+    
+    // Si tenemos texto significativo (más de 100 caracteres)
+    if (extractedText.length > 100) {
+      return extractedText;
+    }
+    
+    console.log('El texto extraído es insuficiente, se usará OCR como respaldo');
+    return '';
+  } catch (error) {
+    console.error('Error en extracción nativa de texto:', error);
+    console.log('Falló la extracción nativa, se procederá con OCR');
+    return '';
+  }
+}
+
 async function performOCR(fileData: string, retryCount = 0): Promise<string> {
   try {
     console.log('Iniciando OCR con Google Vision API');
@@ -162,8 +198,25 @@ serve(async (req) => {
       throw insertError;
     }
 
-    console.log('Procesando documento con OCR...');
-    const extractedText = await performOCR(fileData);
+    let extractedText = '';
+    
+    // Estrategia en capas para extracción de texto
+    if (contentType.includes('pdf') || contentType === 'application/pdf') {
+      console.log('Procesando PDF usando extracción nativa primero...');
+      extractedText = await extractTextNatively(fileData);
+      
+      // Si falla la extracción nativa o no hay suficiente texto, usar OCR como respaldo
+      if (!extractedText || extractedText.length < 100) {
+        console.log('Extracción nativa no efectiva, usando OCR como respaldo...');
+        extractedText = await performOCR(fileData);
+      } else {
+        console.log('Extracción nativa exitosa, no se requiere OCR');
+      }
+    } else {
+      // Para otros formatos (imágenes), usar OCR directamente
+      console.log('Documento no es PDF, procesando directamente con OCR...');
+      extractedText = await performOCR(fileData);
+    }
     
     console.log('Actualizando registro con texto extraído...');
     const finalText = extractedText.trim() || 'No se pudo extraer texto';
