@@ -1,6 +1,5 @@
 
-# project_id is a unique identifier for your project in Supabase
-# If not set, any 
+# project_id es un identificador único para tu proyecto en Supabase
 project_id = "bhergnyfmwmxjrijiwoc"
 
 [api]
@@ -27,8 +26,8 @@ enabled = true
 [realtime]
 enabled = true
 
-[edge_functions]
+# La configuración de las funciones edge ahora se especifica correctamente
+# de acuerdo a la versión actual de Supabase
+[functions]
 enabled = true
-# Ampliamos el tiempo máximo de ejecución a 90 segundos para permitir
-# el procesamiento de hasta 10 CVs en paralelo
 timeout_seconds = 90
