@@ -1,16 +1,43 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { pdfjsLib } from './pdf.js';
+// Actualizar la importación de PDF.js con URL específica
+import pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
 // Corregir la importación de mammoth con una URL específica de Deno
 import * as mammoth from 'https://deno.land/x/mammoth@1.6.0/mod.ts';
 
 // Configurar GlobalWorkerOptions al inicio para evitar errores
-pdfjsLib.GlobalWorkerOptions.workerSrc = false;
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+pdfjsLib.GlobalWorkerOptions.workerPort = null;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Función para extraer texto de PDF
+async function extractTextFromPdf(pdfBytes: Uint8Array) {
+  const loadingTask = pdfjsLib.getDocument({
+    data: pdfBytes,
+    disableWorker: true,
+    useWorkerFetch: false,
+    isEvalSupported: false
+  });
+  
+  const pdfDocument = await loadingTask.promise;
+  console.log(`PDF cargado: ${pdfDocument.numPages} páginas`);
+  
+  // Extraer texto de cada página
+  let textContent = '';
+  for (let i = 1; i <= pdfDocument.numPages; i++) {
+    console.log(`Procesando página ${i}...`);
+    const page = await pdfDocument.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map((item: any) => item.str).join(' ');
+    textContent += pageText + '\n';
+  }
+  
+  return textContent;
+}
 
 Deno.serve(async (req) => {
   // Handle CORS preflight requests
@@ -44,30 +71,7 @@ Deno.serve(async (req) => {
     if (contentType.includes('pdf')) {
       console.log('Procesando PDF...');
       try {
-        console.log('Creando objeto loadingTask...');
-        // Configurar el objeto de carga con opciones específicas para entornos serverless
-        const loadingTask = pdfjsLib.getDocument({
-          data: bytes,
-          disableWorker: true,        // Desactiva worker
-          useWorkerFetch: false,      // En algunos casos, también evita fetch interno
-          isEvalSupported: false      // Puede ayudar en entornos serverless
-        });
-
-        console.log('Cargando documento PDF...');
-        const pdfDocument = await loadingTask.promise;
-        console.log(`PDF cargado: ${pdfDocument.numPages} páginas`);
-
-        // Extraer texto de cada página
-        let textContent = '';
-        for (let i = 1; i <= pdfDocument.numPages; i++) {
-          console.log(`Procesando página ${i}...`);
-          const page = await pdfDocument.getPage(i);
-          const content = await page.getTextContent();
-          const pageText = content.items.map((item: any) => item.str).join(' ');
-          textContent += pageText + '\n';
-        }
-
-        extractedText = textContent;
+        extractedText = await extractTextFromPdf(bytes);
         console.log('Texto extraído del PDF exitosamente');
       } catch (error) {
         console.error('Error procesando PDF:', error);
@@ -93,9 +97,18 @@ Deno.serve(async (req) => {
         );
       }
     } else if (contentType.includes('image')) {
-      console.log('Procesando imagen... [Placeholder para integración OCR]');
-      // Aquí iría la integración con OCR si se decide implementar
-      extractedText = 'Contenido de imagen (se necesita implementar OCR)';
+      console.log('Procesando imagen...');
+      try {
+        console.log('Iniciando extracción de texto de imagen con Vision API...');
+        // Aquí se implementaría la lógica OCR
+        extractedText = 'Contenido de imagen (procesamiento OCR no implementado)';
+      } catch (error) {
+        console.error('Error procesando imagen:', error);
+        return new Response(
+          JSON.stringify({ error: `Error procesando imagen: ${error.message}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        );
+      }
     } else {
       return new Response(
         JSON.stringify({ error: 'Tipo de archivo no soportado' }),
