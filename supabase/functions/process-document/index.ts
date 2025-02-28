@@ -1,7 +1,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { pdfjsLib } from './pdf.js';
-import * as mammoth from 'mammoth';
+// Corregir la importación de mammoth con una URL específica de Deno
+import * as mammoth from 'https://deno.land/x/mammoth@1.6.0/mod.ts';
 
 // Configurar GlobalWorkerOptions al inicio para evitar errores
 pdfjsLib.GlobalWorkerOptions.workerSrc = false;
