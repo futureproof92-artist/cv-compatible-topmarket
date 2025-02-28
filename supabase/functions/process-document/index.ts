@@ -177,19 +177,15 @@ async function extractTextFromPdf(base64Data: string, disableWorker?: boolean) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     
-    // Configuramos las opciones para cargar el PDF con todas las opciones necesarias
-    // para deshabilitar completamente el worker
-    const pdfOptions = {
+    // Usamos exactamente la configuración solicitada
+    console.log('Aplicando configuración para deshabilitar worker en getDocument');
+    const loadingTask = pdfjsLib.getDocument({
       data: bytes,
-      disableWorker: true,
-      useWorkerFetch: false,
-      isEvalSupported: false,
-      standardFontDataUrl: null,
-      workerSrc: null
-    };
+      disableWorker: true,        // Desactiva worker
+      useWorkerFetch: false,      // En algunos casos, también evita fetch interno
+      isEvalSupported: false      // Puede ayudar en entornos serverless
+    });
     
-    console.log('Cargando documento PDF con opciones para deshabilitar worker');
-    const loadingTask = pdfjsLib.getDocument(pdfOptions);
     const pdf = await loadingTask.promise;
     console.log(`PDF cargado. Número de páginas: ${pdf.numPages}`);
     
