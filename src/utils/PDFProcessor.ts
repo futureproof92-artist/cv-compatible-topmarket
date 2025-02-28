@@ -2,8 +2,11 @@
 import { getDocument, GlobalWorkerOptions, PDFDocumentProxy } from 'pdfjs-dist';
 
 // Configura el worker de pdf.js
-// En desarrollo, usamos CDN para el worker
-GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js`;
+// Usamos unpkg como CDN alternativo para el worker, que siempre tendrá la versión más reciente
+GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.min.js`;
+
+// Alternativa si la anterior falla
+// GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.js`;
 
 export const processPDF = async (file: File): Promise<string> => {
   try {
