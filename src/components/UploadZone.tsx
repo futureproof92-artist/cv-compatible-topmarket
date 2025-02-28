@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { withRetry, defaultRetryConfig } from "@/utils/retryUtils";
-import { processPDF } from "@/utils/PDFProcessor";
+import { validatePDF } from "@/utils/PDFProcessor";
 
 interface UploadZoneProps {
   onFilesAccepted: (files: File[], processedData?: any) => void;
@@ -36,35 +36,17 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
     console.log('Iniciando procesamiento del archivo:', file.name, 'tipo:', file.type, 'tamaño:', file.size);
     
     try {
-      let processedText = '';
-      
-      // Si es un PDF, procesarlo en el cliente
+      // Para PDFs, solo validamos que sea un archivo PDF válido
       if (file.type === 'application/pdf') {
-        try {
-          console.log('Procesando PDF en el cliente...');
-          processedText = await processPDF(file);
-          console.log('Texto extraído del PDF en el cliente:', processedText.substring(0, 100) + '...');
-        } catch (pdfError) {
-          console.error('Error procesando PDF en el cliente:', pdfError);
-          toast({
-            title: "Error procesando PDF",
-            description: "No se pudo extraer texto del PDF. Intentando procesar en el servidor...",
-            variant: "destructive"
-          });
+        if (!validatePDF(file)) {
+          throw new Error('El archivo no es un PDF válido');
         }
+        console.log('PDF validado, enviando al servidor para procesamiento');
       }
       
       // Convertir el archivo a base64
       const base64File = await fileToBase64(file);
       console.log('Archivo convertido a base64, enviando a process-document...');
-
-      // Configuración específica para PDFs para deshabilitar correctamente el worker
-      const pdfConfig = file.type.includes('pdf') ? {
-        disableWorker: true,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        clientProcessedText: processedText // Enviar el texto procesado en el cliente si está disponible
-      } : {};
 
       // Enviamos el archivo en base64 junto con metadata
       const { data, error } = await withRetry(
@@ -75,7 +57,7 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
               filename: file.name,
               contentType: file.type,
               fileData: base64File,
-              ...pdfConfig
+              useGoogleVision: true // Indicamos que use Google Vision API para todos los archivos
             }
           });
         },

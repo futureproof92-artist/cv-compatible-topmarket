@@ -1,77 +1,51 @@
 
-import { getDocument, GlobalWorkerOptions, PDFDocumentProxy } from 'pdfjs-dist';
+/**
+ * PDFProcessor.ts - Módulo para validación básica de PDFs
+ * 
+ * NOTA: Este módulo ha sido simplificado para eliminar la dependencia de pdfjs-dist.
+ * Todo el procesamiento del texto de PDFs ahora se realiza en el servidor
+ * usando Google Vision API a través de Edge Functions.
+ */
 
-// Configura el worker de pdf.js
-// Usamos unpkg como CDN alternativo para el worker, que siempre tendrá la versión más reciente
-GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.min.js`;
+/**
+ * Valida si un archivo es un PDF basado en su tipo MIME
+ */
+export const validatePDF = (file: File): boolean => {
+  return file.type === 'application/pdf';
+};
 
-// Alternativa si la anterior falla
-// GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.js`;
-
+/**
+ * Función que ahora solo valida el archivo y devuelve un mensaje
+ * informativo indicando que el procesamiento se realizará en el servidor.
+ */
 export const processPDF = async (file: File): Promise<string> => {
   try {
-    console.log('Iniciando procesamiento de PDF:', file.name);
-
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await getDocument({ data: arrayBuffer }).promise;
-    let extractedText = '';
-
-    console.log(`PDF cargado. Procesando ${pdf.numPages} páginas...`);
-
-    // Itera sobre todas las páginas del PDF
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      console.log(`Procesando página ${pageNum}/${pdf.numPages}`);
-      
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ')
-        .trim();
-
-      if (pageText) {
-        extractedText += pageText + '\n';
-      }
+    console.log('Preparando archivo PDF para enviar al servidor:', file.name);
+    
+    if (!validatePDF(file)) {
+      throw new Error('El archivo no es un PDF válido');
     }
-
-    const finalText = extractedText.trim();
-    console.log('Texto extraído:', finalText ? 'Texto encontrado' : 'No se encontró texto');
-
-    // Si se extrajo texto, devuélvelo; si no, retorna vacío para indicar que es una imagen
-    if (!finalText) {
-      console.log('PDF parece ser una imagen escaneada o no contiene texto seleccionable');
-    }
-
-    return finalText;
+    
+    // Devolvemos una cadena vacía para indicar que el procesamiento
+    // se realizará en el servidor
+    return '';
   } catch (error) {
-    console.error('Error procesando PDF con pdf.js:', error);
+    console.error('Error validando PDF:', error);
     throw new Error('Error al procesar el PDF: ' + (error instanceof Error ? error.message : 'Error desconocido'));
   }
 };
 
-// Función para verificar si un PDF contiene texto seleccionable
+/**
+ * Verifica si un PDF contiene texto seleccionable
+ * Esta función ahora simplemente comprueba si el archivo es un PDF válido
+ */
 export const hasPDFText = async (file: File): Promise<boolean> => {
   try {
-    const text = await processPDF(file);
-    return text.length > 0;
+    // Ahora solo verificamos si es un PDF válido
+    return validatePDF(file);
   } catch (error) {
-    console.error('Error verificando texto en PDF:', error);
+    console.error('Error verificando PDF:', error);
     return false;
   }
 };
 
-// Función para validar que el archivo es un PDF válido
-export const validatePDF = async (file: File): Promise<boolean> => {
-  if (file.type !== 'application/pdf') {
-    return false;
-  }
-
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    await getDocument({ data: arrayBuffer }).promise;
-    return true;
-  } catch (error) {
-    console.error('Error validando PDF:', error);
-    return false;
-  }
-};
