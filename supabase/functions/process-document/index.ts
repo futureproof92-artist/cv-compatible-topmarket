@@ -3,6 +3,9 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
 
+// Configurar GlobalWorkerOptions al inicio para evitar errores
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -174,19 +177,18 @@ async function extractTextFromPdf(base64Data: string, disableWorker?: boolean) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     
-    // Configuramos las opciones para cargar el PDF
-    const pdfOptions: any = { data: bytes };
+    // Configuramos las opciones para cargar el PDF con todas las opciones necesarias
+    // para deshabilitar completamente el worker
+    const pdfOptions = {
+      data: bytes,
+      disableWorker: true,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      standardFontDataUrl: null,
+      workerSrc: null
+    };
     
-    // Aplicamos las opciones para deshabilitar el worker si es necesario
-    if (disableWorker) {
-      console.log('Aplicando configuración para deshabilitar worker en getDocument');
-      pdfOptions.useWorkerFetch = false;
-      pdfOptions.isEvalSupported = false;
-      pdfOptions.disableWorker = true;
-    }
-    
-    // Cargamos el documento PDF con las opciones configuradas
-    console.log('Cargando documento PDF con opciones:', JSON.stringify(pdfOptions));
+    console.log('Cargando documento PDF con opciones para deshabilitar worker');
     const loadingTask = pdfjsLib.getDocument(pdfOptions);
     const pdf = await loadingTask.promise;
     console.log(`PDF cargado. Número de páginas: ${pdf.numPages}`);
