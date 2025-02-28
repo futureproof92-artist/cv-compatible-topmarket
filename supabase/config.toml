@@ -1,1 +1,34 @@
+
+# project_id is a unique identifier for your project in Supabase
+# If not set, any 
 project_id = "bhergnyfmwmxjrijiwoc"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+
+[db]
+port = 54322
+
+[studio]
+port = 54323
+
+[inbucket]
+port = 54324
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+
+[storage]
+enabled = true
+
+[realtime]
+enabled = true
+
+[edge_functions]
+enabled = true
+# Ampliamos el tiempo máximo de ejecución a 90 segundos para permitir
+# el procesamiento de hasta 10 CVs en paralelo
+timeout_seconds = 90
