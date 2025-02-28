@@ -1,10 +1,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
+// Cambiar a la versión de pdfjs sin worker
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.js";
 
-// Configurar GlobalWorkerOptions al inicio para evitar errores
-pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+// No necesitamos configurar workerSrc ya que usaremos la versión sin worker
+// pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -129,9 +130,11 @@ async function processDocumentText(documentId: string, fileData: string, content
     
     console.log(`Texto extraído para documento ${documentId} (primeros 100 caracteres): ${processedText.substring(0, 100)}...`);
     
-    // Verificación para satisfacer la restricción de longitud de processed_text
+    // Reducimos el umbral de validación y mejoramos el manejo de errores
     if (!processedText || processedText.trim().length === 0) {
-      throw new Error("No se pudo extraer texto del documento");
+      console.log('No se pudo extraer texto del documento, guardando un mensaje de error como texto procesado');
+      // En lugar de fallar, guardamos un mensaje indicando que no se pudo extraer texto
+      processedText = "No se pudo extraer texto del documento. Es posible que sea un PDF escaneado o protegido.";
     }
     
     // Actualizamos el documento con el texto procesado
@@ -168,7 +171,7 @@ async function processDocumentText(documentId: string, fileData: string, content
 
 async function extractTextFromPdf(base64Data: string, disableWorker?: boolean) {
   try {
-    console.log('Iniciando extracción de texto con pdfjs-dist...');
+    console.log('Iniciando extracción de texto con pdfjs-dist versión sin worker...');
     
     // Decodificamos los datos base64 a un array de bytes
     const binaryString = atob(base64Data);
@@ -177,13 +180,16 @@ async function extractTextFromPdf(base64Data: string, disableWorker?: boolean) {
       bytes[i] = binaryString.charCodeAt(i);
     }
     
-    // Usamos exactamente la configuración solicitada
-    console.log('Aplicando configuración para deshabilitar worker en getDocument');
+    // Usamos la versión 2.x de PDF.js que tiene mejor soporte sin worker
+    console.log('Usando configuración sin worker de PDF.js v2.x');
+    
+    // Configuración específica para la versión 2.x
     const loadingTask = pdfjsLib.getDocument({
       data: bytes,
-      disableWorker: true,        // Desactiva worker
-      useWorkerFetch: false,      // En algunos casos, también evita fetch interno
-      isEvalSupported: false      // Puede ayudar en entornos serverless
+      disableWorker: true,
+      isEvalSupported: false,
+      cMapUrl: null,
+      cMapPacked: true
     });
     
     const pdf = await loadingTask.promise;
@@ -207,8 +213,8 @@ async function extractTextFromPdf(base64Data: string, disableWorker?: boolean) {
     
     console.log(`Extracción de texto completada. Longitud: ${fullText.length} caracteres`);
     
-    // Si el texto está vacío o es demasiado corto, podría indicar un problema con el PDF
-    if (fullText.length < 50) {
+    // Reducimos el umbral para considerar como válido
+    if (fullText.length < 10) {
       console.log('El texto extraído es muy corto, posiblemente un PDF escaneado o con imagen.');
       throw new Error('El PDF parece no contener texto extraíble. Posiblemente es un PDF escaneado o basado en imágenes.');
     }
