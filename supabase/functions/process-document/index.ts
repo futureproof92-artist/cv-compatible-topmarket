@@ -1,8 +1,8 @@
 
 // Actualizar la importación de supabase-js con una URL específica
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-// Actualizar la importación de PDF.js con URL específica
-import pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
+// Importar pdfjsLib correctamente con las exportaciones nombradas
+import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
 
 // Configurar GlobalWorkerOptions al inicio para evitar errores
 pdfjsLib.GlobalWorkerOptions.workerSrc = "";
