@@ -3,8 +3,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 // Actualizar la importación de PDF.js con URL específica
 import pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
-// Corregir la importación de mammoth con una URL específica de Deno
-import * as mammoth from 'https://deno.land/x/mammoth@1.6.0/mod.ts';
 
 // Configurar GlobalWorkerOptions al inicio para evitar errores
 pdfjsLib.GlobalWorkerOptions.workerSrc = "";
@@ -86,17 +84,14 @@ Deno.serve(async (req) => {
                filename.endsWith('.docx') || 
                filename.endsWith('.doc')) {
       console.log('Procesando documento Word...');
-      try {
-        const result = await mammoth.extractRawText({ arrayBuffer: bytes });
-        extractedText = result.value;
-        console.log('Texto extraído del documento Word exitosamente');
-      } catch (error) {
-        console.error('Error procesando documento Word:', error);
-        return new Response(
-          JSON.stringify({ error: `Error procesando documento Word: ${error.message}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
-        );
-      }
+      // Como no podemos usar mammoth.js en Deno, informamos al usuario
+      return new Response(
+        JSON.stringify({ 
+          error: 'El procesamiento de documentos Word no está disponible en este momento.',
+          message: 'Por favor, convierte tu documento a PDF e inténtalo de nuevo.' 
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+      );
     } else if (contentType.includes('image')) {
       console.log('Procesando imagen...');
       try {
