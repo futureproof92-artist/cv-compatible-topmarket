@@ -82,13 +82,19 @@ async function withRetry(operation, config = retryConfig, onRetry = null) {
 async function getGoogleAccessToken(credentials) {
   console.log('Iniciando autenticación con Google Cloud...');
   try {
+    // Usar scopes específicos para Vision API en lugar del scope general de cloud-platform
     const jwtPayload = {
       iss: credentials.client_email,
-      scope: 'https://www.googleapis.com/auth/cloud-platform',
+      scope: [
+        'https://www.googleapis.com/auth/cloud-vision',
+        'https://www.googleapis.com/auth/cloud-platform'
+      ].join(' '),
       aud: 'https://oauth2.googleapis.com/token',
       exp: Math.floor(Date.now() / 1000) + 3600,
       iat: Math.floor(Date.now() / 1000),
     };
+
+    console.log('Scopes de autenticación configurados:', jwtPayload.scope);
 
     // Crear el JWT firmado
     const encoder = new TextEncoder();
@@ -134,7 +140,7 @@ async function getGoogleAccessToken(credentials) {
     
     const jwt = `${encodedHeader}.${encodedPayload}.${signature}`;
     
-    // Solicitar token de acceso
+    // Solicitar token de acceso con logging adicional
     console.log('Solicitando token de acceso a Google OAuth...');
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -145,7 +151,7 @@ async function getGoogleAccessToken(credentials) {
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text();
       console.error('Error en respuesta de token:', errorText);
-      throw new Error(`Error obteniendo token: ${tokenResponse.status} ${tokenResponse.statusText}`);
+      throw new Error(`Error obteniendo token: ${tokenResponse.status} ${tokenResponse.statusText} - ${errorText}`);
     }
     
     const tokenData = await tokenResponse.json();
@@ -250,7 +256,7 @@ async function processDocumentWithVision(base64File, filename, contentType) {
         if (!response.ok) {
           const errorText = await response.text();
           console.error('[Vision] Error en respuesta de Vision API:', errorText);
-          throw new Error(`Error en Vision API: ${response.status} ${response.statusText}`);
+          throw new Error(`Error en Vision API: ${response.status} ${response.statusText} - ${errorText}`);
         }
         
         return response.json();
