@@ -5,6 +5,7 @@ import { Upload } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
+import { withRetry, defaultRetryConfig } from "@/utils/retryUtils";
 
 interface UploadZoneProps {
   onFilesAccepted: (files: File[], processedData?: any) => void;
@@ -38,16 +39,43 @@ const UploadZone = ({ onFilesAccepted }: UploadZoneProps) => {
       const base64File = await fileToBase64(file);
       console.log('Archivo convertido a base64, enviando a process-document...');
 
+      // Configuración específica para PDFs para deshabilitar correctamente el worker
+      const pdfConfig = file.type.includes('pdf') ? {
+        disableWorker: true,
+        useWorkerFetch: false,
+        isEvalSupported: false
+      } : {};
+
       // Enviamos el archivo en base64 junto con metadata
-      const { data, error } = await supabase.functions.invoke('process-document', {
-        method: 'POST',
-        body: {
-          filename: file.name,
-          contentType: file.type,
-          fileData: base64File,
-          disableWorker: true // Añadimos esta opción para indicar que queremos desactivar el worker
+      const { data, error } = await withRetry(
+        async () => {
+          return await supabase.functions.invoke('process-document', {
+            method: 'POST',
+            body: {
+              filename: file.name,
+              contentType: file.type,
+              fileData: base64File,
+              ...pdfConfig
+            }
+          });
+        },
+        defaultRetryConfig,
+        (attempt, error) => {
+          console.log(`Reintento ${attempt} al procesar ${file.name}:`, error);
+          if (attempt === defaultRetryConfig.maxRetries) {
+            toast({
+              title: "Error después de varios intentos",
+              description: `No se pudo procesar el archivo ${file.name} después de ${defaultRetryConfig.maxRetries} intentos.`,
+              variant: "destructive"
+            });
+          } else {
+            toast({
+              title: `Reintentando (${attempt}/${defaultRetryConfig.maxRetries})`,
+              description: `Hubo un problema al procesar ${file.name}. Reintentando...`
+            });
+          }
         }
-      });
+      );
 
       if (error) {
         console.error('Error invocando la función:', error);
