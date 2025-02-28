@@ -264,10 +264,10 @@ async function processDocumentWithVision(base64File, filename, contentType) {
     // Extraer el texto de la respuesta
     let extractedText = '';
     
-    if (visionData.responses && visionData.responses.length > 0) {
-      console.log(`[Vision] Procesando ${visionData.responses.length} respuestas de Vision API`);
+    if (visionResponse.responses && visionResponse.responses.length > 0) {
+      console.log(`[Vision] Procesando ${visionResponse.responses.length} respuestas de Vision API`);
       
-      for (const response of visionData.responses) {
+      for (const response of visionResponse.responses) {
         if (response.fullTextAnnotation && response.fullTextAnnotation.text) {
           extractedText += response.fullTextAnnotation.text + '\n';
         }
