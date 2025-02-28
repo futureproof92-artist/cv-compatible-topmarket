@@ -2,8 +2,8 @@
 /**
  * PDFProcessor.ts - Módulo para validación básica de PDFs
  * 
- * NOTA: Este módulo ha sido simplificado para eliminar la dependencia de pdfjs-dist.
- * Todo el procesamiento del texto de PDFs ahora se realiza en el servidor
+ * Este módulo realiza solo validaciones básicas.
+ * Todo el procesamiento del texto de PDFs se realiza en el servidor
  * usando Google Vision API a través de Edge Functions.
  */
 
@@ -48,4 +48,3 @@ export const hasPDFText = async (file: File): Promise<boolean> => {
     return false;
   }
 };
-
