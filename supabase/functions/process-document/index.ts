@@ -1,5 +1,6 @@
 
-import { createClient } from '@supabase/supabase-js';
+// Actualizar la importación de supabase-js con una URL específica
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 // Actualizar la importación de PDF.js con URL específica
 import pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.189/build/pdf.min.mjs";
 // Corregir la importación de mammoth con una URL específica de Deno
