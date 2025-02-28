@@ -2,10 +2,19 @@
 // Imports necesarios para la Edge Function
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 
-// Encabezados CORS para permitir solicitudes desde cualquier origen
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// Encabezados CORS con dominios específicos permitidos
+const allowedOrigins = [
+  'https://lovable.dev',      // Dominio principal de Lovable (cubrirá todas las rutas)
+  'http://localhost:3000'     // Para desarrollo local
+];
+
+// Función para generar los encabezados CORS basados en el origen de la solicitud
+const getCorsHeaders = (req) => {
+  const origin = req.headers.get('origin');
+  return {
+    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : allowedOrigins[0],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  };
 };
 
 // Función para autenticar con Google Cloud y obtener un token de acceso
@@ -197,7 +206,7 @@ async function withRetry(operation, maxRetries = 3, initialDelay = 1000) {
 Deno.serve(async (req) => {
   // Manejar solicitudes CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(req) });
   }
 
   console.log('Solicitud recibida en process-document');
@@ -216,7 +225,7 @@ Deno.serve(async (req) => {
     if (!fileData) {
       return new Response(
         JSON.stringify({ error: 'No se proporcionaron datos de archivo' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
       );
     }
 
@@ -255,7 +264,7 @@ Deno.serve(async (req) => {
         console.error('Error guardando en base de datos:', dbError);
         return new Response(
           JSON.stringify({ error: `Error guardando en base de datos: ${dbError.message}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+          { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
         );
       }
 
@@ -263,7 +272,7 @@ Deno.serve(async (req) => {
 
       return new Response(
         JSON.stringify({ success: true, document }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' } }
       );
     } catch (processingError) {
       console.error('Error procesando texto del documento:', processingError);
@@ -294,13 +303,13 @@ Deno.serve(async (req) => {
             error: `Error procesando documento: ${processingError.message}`,
             document: errorDocument
           }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+          { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
         );
       } catch (dbError) {
         console.error('Error guardando documento con error:', dbError);
         return new Response(
           JSON.stringify({ error: `Error procesando documento: ${processingError.message}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+          { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
         );
       }
     }
@@ -310,7 +319,7 @@ Deno.serve(async (req) => {
     
     return new Response(
       JSON.stringify({ error: `Error procesando documento: ${error.message}` }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      { headers: { ...getCorsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
     );
   }
 });
