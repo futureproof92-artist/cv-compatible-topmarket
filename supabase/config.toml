@@ -28,7 +28,7 @@ enabled = true
 
 # Estructura correcta para la configuración de funciones Edge
 [functions]
+[functions.serve]
 enabled = true
-
-[functions.options]
+[functions.serve.options]
 timeout = 90
